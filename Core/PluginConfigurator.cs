@@ -70,10 +70,11 @@ public sealed class PluginConfigurator
                 WriteSavedVariables(svPath, syncIncomingChannels, lines);
             }
 
-            // ---- 3. Lua 频道标签补丁 ----
+            // ---- 3. Lua 补丁：频道标签 + 语言启发式 ----
             if (patchLuaChannelTag)
             {
                 PatchLuaChannelTag(Path.Combine(addonDir, "WoWTranslate.lua"), lines);
+                PatchLuaLanguageHeuristic(Path.Combine(addonDir, "WoWTranslate.lua"), lines);
             }
 
             lines.Add("✅ 一键配置完成。请完全重启游戏客户端后生效（ADR：部署后必须重启客户端）。");
@@ -275,6 +276,63 @@ public sealed class PluginConfigurator
             return;
         }
         lines.Add($"✔ WoWTranslate.lua 已注入频道标签补丁（备份 {Path.GetFileName(backup)}）");
+    }
+
+    // ==================== Lua 语言启发式补丁 ====================
+
+    /// <summary>
+    /// 修插件端语言启发式漏网：插件判断"是不是英文"时直接数字母，而它给物品链接生成的
+    /// <c>|cff........http://ph.wt/N|r</c> 包装自带 8+ 个 ASCII 字母，导致纯中文句子
+    /// （如"[HC] 我觉得是血"剥占位符后只剩 2 个字母 HC）被判成英文送去翻译。
+    /// 修复：ContainsSourceLanguage 判语言前剥离颜色包装与占位符（2026-09-11 游戏实测）。
+    /// 幂等：已打补丁的文件跳过。
+    /// </summary>
+    public static void PatchLuaLanguageHeuristic(string luaPath, List<string> lines)
+    {
+        if (!File.Exists(luaPath))
+        {
+            lines.Add($"⚠ 未找到 {luaPath}，Lua 语言补丁跳过");
+            return;
+        }
+
+        var text = File.ReadAllText(luaPath);
+        const string patchMark = "WTC语言补丁";
+        const string target = "    return ContainsLanguageChars(text, sourceLang)";
+        const string replacement =
+            "    -- WTC语言补丁：剥离颜色包装与链接占位符后再判语言，纯中文不再被骗成英文\n" +
+            "    text = string.gsub(text, \"|c%x%x%x%x%x%x%x%x.-|r\", \"\")\n" +
+            "    text = string.gsub(text, \"http://ph%.wt/%d+\", \"\")\n" +
+            "    return ContainsLanguageChars(text, sourceLang)";
+
+        if (text.Contains(patchMark))
+        {
+            lines.Add("✔ WoWTranslate.lua 已带语言启发式补丁，跳过");
+            return;
+        }
+
+        var count = Regex.Matches(text, Regex.Escape(target)).Count;
+        if (count != 1)
+        {
+            lines.Add($"⚠ ContainsSourceLanguage 返回点匹配数异常（{count}，期望 1），语言补丁跳过——插件文件版本可能已变化，请人工确认");
+            return;
+        }
+
+        var dir = Path.GetDirectoryName(luaPath)!;
+        var name = Path.GetFileName(luaPath);
+        var backup = Path.Combine(dir, $"{name}.bak_{DateTime.Now:yyyyMMdd_HHmmss}");
+        File.Copy(luaPath, backup, overwrite: true);
+
+        File.WriteAllText(luaPath, text.Replace(target, replacement), new UTF8Encoding(false));
+
+        // 写后自检：补丁标记必须存在，否则回滚
+        var after = File.ReadAllText(luaPath);
+        if (!after.Contains(patchMark))
+        {
+            File.Copy(backup, luaPath, overwrite: true);
+            lines.Add("❌ 语言补丁写入自检失败，已回滚备份");
+            return;
+        }
+        lines.Add($"✔ WoWTranslate.lua 已注入语言启发式补丁（备份 {Path.GetFileName(backup)}）");
     }
 
     private static void BackupIfExists(string path, List<string> lines)
