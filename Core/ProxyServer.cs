@@ -311,6 +311,9 @@ public sealed class ProxyServer : IDisposable
         var channel = MessageFilter.ParseChannelTag(userContent, out var cleanText);
         var ctx = new TranslationContext(cleanText, body, _cfg) { Channel = channel };
 
+        // 落盘留证：DLL 实际发来的请求文本 + 原始报文前 120 字节 hex（诊断编码损坏用）
+        if (_cfg.WriteFileLog) WriteTrafficLog(channel, cleanText, body);
+
         // ---- Filter → Glossary → Cache ----
         foreach (var stage in _stages)
         {
@@ -385,6 +388,24 @@ public sealed class ProxyServer : IDisposable
     }
 
     /// <summary>从请求 JSON 中取出最后一条 user 消息作为待译文本。</summary>
+    private static readonly object _trafficLogLock = new();
+
+    /// <summary>
+    /// 将 DLL 发来的请求原文与原始报文 hex 追加到 proxy_traffic.log。
+    /// 诊断插件编码损坏的唯一铁证：能看出 DLL 到底发的是 UTF-8 中文、\uXXXX 还是 '?????'。
+    /// </summary>
+    private static void WriteTrafficLog(string? channel, string text, byte[] rawBody)
+    {
+        try
+        {
+            var hex = string.Concat(rawBody.Take(120).Select(b => b.ToString("x2")));
+            var line = $"{DateTime.Now:HH:mm:ss.fff}\t{(channel ?? "-")}\t{text.Replace('\n', ' ')}\tHEX:{hex}\n";
+            lock (_trafficLogLock)
+                File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "proxy_traffic.log"), line, new System.Text.UTF8Encoding(false));
+        }
+        catch { /* 日志失败不影响翻译 */ }
+    }
+
     private static string ExtractUserContent(JsonDocument doc)
     {
         var userContent = string.Empty;
