@@ -367,9 +367,13 @@ public sealed class ProxyServer : IDisposable
         Emit(kind, ruleId, ruleName, kind == TrafficKind.UpstreamError
             ? $"{ctx.OriginalText} | {reply.Error}" : ctx.OriginalText, sw);
 
-        var payload = kind == TrafficKind.Model
-            ? Encoding.UTF8.GetBytes(reply.RawBody)
-            : Encoding.UTF8.GetBytes(BuildOpenAiResponse(finalText));
+        // 2026-09-11 游戏实测：模型路径不再透传 llama 的原生 UTF-8 响应体，统一走
+        // BuildOpenAiResponse（默认转义器把非 ASCII 写成 \uXXXX 纯 ASCII）。
+        // 背景：WoWTranslate335.dll 在入站路径把原生 UTF-8 中文逐字转成 '?'（宽字符→ANSI
+        // 转换特征），英文请求→中文译文同样损坏（"BOSS" 存活、中文全灭）。若 DLL 的 JSON
+        // 解析器认识 \u 转义（走十六进制→宽字符路径，不经 ANSI 转换），此改动即绕过损坏；
+        // 若仍为 ?，则损坏在 DLL 宽字符→ANSI 输出层，只能靠 Track B 自有 DLL 根治。
+        var payload = Encoding.UTF8.GetBytes(BuildOpenAiResponse(finalText));
         await SendRawAsync(stream, 200, payload, "application/json", keepAlive, ct)
             .ConfigureAwait(false);
     }
