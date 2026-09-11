@@ -24,3 +24,5 @@ tools/WoWTranslateControlSmoke/obj/
 nul
 Thumbs.db
 proxy_traffic.log
+vendor/
+patches/335/build/

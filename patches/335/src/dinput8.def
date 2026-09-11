@@ -1,0 +1,7 @@
+LIBRARY dinput8
+EXPORTS
+    DirectInput8Create   = Stub_DirectInput8Create
+    DllCanUnloadNow      = Stub_DllCanUnloadNow
+    DllGetClassObject    = Stub_DllGetClassObject
+    DllRegisterServer    = Stub_DllRegisterServer
+    DllUnregisterServer  = Stub_DllUnregisterServer
