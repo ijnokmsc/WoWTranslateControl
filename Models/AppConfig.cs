@@ -94,6 +94,12 @@ public sealed class AppConfig
     /// <summary>R6 的英文/中文倍率阈值。越小越激进（过滤越多）。</summary>
     public double ChineseRatioLimit { get; set; } = 2.0;
 
+    /// <summary>
+    /// R7 乱码兜底：连续 5+ 个 '?' 判定为编码损坏文本（GS DLL 把中文逐字转成 ? 的产物），
+    /// 翻译它毫无意义，直接拦截。真实玩家聊天连打 5 个以上问号极罕见，可单独关闭。
+    /// </summary>
+    public bool RuleMangled { get; set; } = true;
+
     // ---------- 频道过滤（C0-C8） ----------
     /// <summary>频道过滤总开关。频道标签由插件 Lua 补丁注入（\1CH\1 前缀），控制台无条件剥离。</summary>
     public bool ChannelFilterEnabled { get; set; } = true;
@@ -174,11 +180,13 @@ public sealed class AppConfig
         ("RuleCombatOther", "R3 其他战斗事件",
          "含 SWING_ / RANGE_ / ENVIRONMENTAL_ 前缀的战斗事件标识。"),
         ("RuleLoot", "R4 拾取播报",
-         "含 获得了物品 / 赢得了 / 放弃了 / 贪婪 / 需求 / 掷点 / 制造了 等固定词。"),
+         "含 获得了物品 / 赢得了 / 放弃了 / 贪婪 / 需求 / 掷点 等中文固定词，及 automatically passes on / cannot loot that item / wins the roll 等英文固定句式。"),
         ("RuleDamageDeath", "R5 伤害死亡播报",
          "含 点物理伤害 / 吸收了 / 杀死了 / 死亡 / 挥了挥手 等中文播报。"),
         ("RuleChineseOnly", "R6 中文兜底（启发式）",
          "剥离魔兽标记后中文占主导，判定无需 EN→ZH 翻译。可单独关闭以防误伤。"),
+        ("RuleMangled", "R7 乱码兜底",
+         "连续 5+ 个 '?' 判定为编码损坏文本（GS DLL 出入站把中文逐字转成 ? 的产物），翻译无意义，直接拦截。"),
     };
 
     private static string ConfigPath =>

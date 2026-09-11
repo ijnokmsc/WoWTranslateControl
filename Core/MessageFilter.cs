@@ -65,6 +65,8 @@ public static class MessageFilter
         RegexOptions.Compiled);
 
     private static readonly Regex ReMarkupH = new(@"\|H[^|]*\|h", RegexOptions.Compiled);
+    // ---- R7 乱码兜底：GS DLL 出入站把中文逐字转成 '?'（宽字符→ANSI），连续 5+ 个 ? 即损坏文本 ----
+    private static readonly Regex ReMangled = new(@"\?{5,}", RegexOptions.Compiled);
     private static readonly Regex ReMarkupT = new(@"\|T[^|]*\|t", RegexOptions.Compiled);
     private static readonly Regex ReMarkupColor = new(@"\|c[0-9a-fA-F]{8}|\|r|\|h", RegexOptions.Compiled);
     private static readonly Regex ReUrl = new(@"https?://\S+", RegexOptions.Compiled);
@@ -161,6 +163,15 @@ public static class MessageFilter
     {
         if (string.IsNullOrWhiteSpace(content))
             return new FilterDecision(true, "R0", "空消息", "内容为空，无需翻译");
+
+        // R7 放最前：乱码文本连内容判定都没意义（且会骗过 R6——损坏后 CJK 计数归零）
+        if (cfg.RuleMangled)
+        {
+            var m7 = ReMangled.Match(content);
+            if (m7.Success)
+                return new FilterDecision(true, "R7", "乱码兜底",
+                    $"命中 {m7.Value.Length} 连'?'（DLL 编码损坏文本，翻译无意义）");
+        }
 
         if (cfg.RuleIconSpam)
         {

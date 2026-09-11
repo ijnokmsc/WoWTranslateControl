@@ -72,6 +72,25 @@ public class MessageFilterTests
     }
 
     [Theory]
+    [InlineData("????? [Yuna's Bag] ????????????")]          // DLL 编码损坏产物
+    [InlineData("翻译请求里的 ????? 全是坏档")]
+    public void R7_乱码兜底_被拦截(string content)
+    {
+        var d = MessageFilter.Classify(content, Cfg());
+        Assert.True(d.Filtered);
+        Assert.Equal("R7", d.RuleId);
+    }
+
+    [Theory]
+    [InlineData("what??? really???")]                        // 真实聊天连打 3 个问号，不误杀
+    [InlineData("w me for invite raid new world bosses")]
+    public void R7_真实聊天_放行(string content)
+    {
+        var d = MessageFilter.Classify(content, Cfg());
+        Assert.False(d.Filtered);
+    }
+
+    [Theory]
     [InlineData("lf tank http://ph.wt/1")]                    // 真实玩家聊天，带占位符
     [InlineData("LFM a Tank and a DPS http://ph.wt/1")]
     [InlineData("anyone knows where the quest npc is?")]
