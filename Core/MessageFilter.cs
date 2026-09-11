@@ -66,7 +66,7 @@ public static class MessageFilter
 
     private static readonly Regex ReMarkupH = new(@"\|H[^|]*\|h", RegexOptions.Compiled);
     // ---- R7 乱码兜底：GS DLL 出入站把中文逐字转成 '?'（宽字符→ANSI），连续 5+ 个 ? 即损坏文本 ----
-    private static readonly Regex ReMangled = new(@"\?{5,}", RegexOptions.Compiled);
+    private static readonly Regex ReMangled = new(@"\?{4,}", RegexOptions.Compiled);
     private static readonly Regex ReMarkupT = new(@"\|T[^|]*\|t", RegexOptions.Compiled);
     private static readonly Regex ReMarkupColor = new(@"\|c[0-9a-fA-F]{8}|\|r|\|h", RegexOptions.Compiled);
     private static readonly Regex ReUrl = new(@"https?://\S+", RegexOptions.Compiled);
@@ -223,6 +223,20 @@ public static class MessageFilter
             if (cjk >= 1 && latin <= cjk * cfg.ChineseRatioLimit)
                 return new FilterDecision(true, "R6", "中文为主(兜底)",
                     $"剥离标记后 中文{cjk}字 / 英文{latin}字母，无需翻译");
+        }
+
+        // R8 已含中文（绝对字数）：中文 ≥ 阈值即无需 EN→ZH，不看英文比例。
+        // 游戏实测补充：Questie 等插件播报（"Questie: [ERROR] Questie 数据库中缺少的
+        // 任务 90133，请到 GitHub 或 Discord 上报告"）中文 17 字但英文 32 字母，
+        // R6 比例规则擦边漏过 → 模型把中文再翻成另一种中文，纯浪费。
+        // 这类播报混着 addon 名/链接，永远不是需要翻译的玩家聊天。
+        if (cfg.RuleChinesePresent)
+        {
+            var plain = StripWoWMarkup(content);
+            var cjk = ReCjk.Matches(plain).Count;
+            if (cjk >= cfg.ChinesePresentMinChars)
+                return new FilterDecision(true, "R8", "已含中文(插件播报)",
+                    $"剥离标记后含中文 {cjk} 字（≥{cfg.ChinesePresentMinChars}），本就是中文内容，EN→ZH 无事可做");
         }
 
         return new FilterDecision(false, "-", "需要翻译", "判定为玩家聊天，转发模型");

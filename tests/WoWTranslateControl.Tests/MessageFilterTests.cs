@@ -73,7 +73,7 @@ public class MessageFilterTests
 
     [Theory]
     [InlineData("????? [Yuna's Bag] ????????????")]          // DLL 编码损坏产物
-    [InlineData("翻译请求里的 ????? 全是坏档")]
+    [InlineData("? ???? [Nicholastang]")]                     // 游戏实测：分散 1+4 连，最大段 4 也要拦
     public void R7_乱码兜底_被拦截(string content)
     {
         var d = MessageFilter.Classify(content, Cfg());
@@ -91,6 +91,25 @@ public class MessageFilterTests
     }
 
     [Theory]
+    [InlineData("Questie: [ERROR] Questie 数据库中缺少的任务 90133，请到 GitHub 或 Discord 上报告，谢谢!")] // 游戏实测：R6 比例擦边，靠 R8/R6 任一拦截即可
+    [InlineData("数据库缺少任务了请到 GithubDiscordGithubDiscordGithub 上报告谢谢")]  // 纯 R8 场景：cjk 15 / latin 32，R6 比例规则放行
+    public void R8_已含中文_被拦截(string content)
+    {
+        var d = MessageFilter.Classify(content, Cfg());
+        Assert.True(d.Filtered);
+        Assert.Contains(d.RuleId, new[] { "R6", "R8" });
+    }
+
+    [Theory]
+    [InlineData("lfm 黑上 need 1 healer and 2 dps")]          // 真实组队聊天：中文仅 2 字（地名），不触发 R8
+    [InlineData("wtf the boss bugged out 中?")]               // 中文 1 字，远离阈值
+    public void R8_真实聊天_放行(string content)
+    {
+        var d = MessageFilter.Classify(content, Cfg());
+        Assert.False(d.Filtered);
+    }
+
+    [Theory]
     [InlineData("lf tank http://ph.wt/1")]                    // 真实玩家聊天，带占位符
     [InlineData("LFM a Tank and a DPS http://ph.wt/1")]
     [InlineData("anyone knows where the quest npc is?")]
@@ -98,8 +117,7 @@ public class MessageFilterTests
     [InlineData("w me for invite raid new world bosses")]     // 2026-09-11 游戏实测：R4 英文词不得误杀真实组队聊天
     [InlineData("pass me the flask pls")]                     // "pass" 单独出现不匹配 "passes on"
     public void 玩家聊天_放行(string content)
-    {
-        var d = MessageFilter.Classify(content, Cfg());
+    {        var d = MessageFilter.Classify(content, Cfg());
         Assert.False(d.Filtered);
     }
 

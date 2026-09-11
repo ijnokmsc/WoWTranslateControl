@@ -95,10 +95,20 @@ public sealed class AppConfig
     public double ChineseRatioLimit { get; set; } = 2.0;
 
     /// <summary>
-    /// R7 乱码兜底：连续 5+ 个 '?' 判定为编码损坏文本（GS DLL 把中文逐字转成 ? 的产物），
-    /// 翻译它毫无意义，直接拦截。真实玩家聊天连打 5 个以上问号极罕见，可单独关闭。
+    /// R7 乱码兜底：最大连续段 4+ 个 '?' 判定为编码损坏文本（GS DLL 把中文逐字转成 ? 的产物），
+    /// 翻译它毫无意义，直接拦截。真实玩家聊天分散 3 连问号（"what??? really???"）不误杀，可单独关闭。
     /// </summary>
     public bool RuleMangled { get; set; } = true;
+
+    /// <summary>
+    /// R8 已含中文：剥离魔兽标记后中文字数 ≥ 阈值即拦截，不看英文比例。
+    /// 针对 Questie/DBM 等插件播报——内容本就是中文（addon 名、GitHub/Discord 链接
+    /// 拉高英文字母数，R6 比例规则擦边漏过），模型只会把中文翻成另一种中文，纯浪费。
+    /// </summary>
+    public bool RuleChinesePresent { get; set; } = true;
+
+    /// <summary>R8 的中文字数阈值。</summary>
+    public int ChinesePresentMinChars { get; set; } = 8;
 
     // ---------- 频道过滤（C0-C8） ----------
     /// <summary>频道过滤总开关。频道标签由插件 Lua 补丁注入（\1CH\1 前缀），控制台无条件剥离。</summary>
@@ -186,7 +196,9 @@ public sealed class AppConfig
         ("RuleChineseOnly", "R6 中文兜底（启发式）",
          "剥离魔兽标记后中文占主导，判定无需 EN→ZH 翻译。可单独关闭以防误伤。"),
         ("RuleMangled", "R7 乱码兜底",
-         "连续 5+ 个 '?' 判定为编码损坏文本（GS DLL 出入站把中文逐字转成 ? 的产物），翻译无意义，直接拦截。"),
+         "最大连续段 4+ 个 '?' 判定为编码损坏文本（GS DLL 出入站把中文逐字转成 ? 的产物），翻译无意义，直接拦截。分散 3 连问号的真实聊天不误杀。"),
+        ("RuleChinesePresent", "R8 已含中文（插件播报）",
+         "剥离标记后中文 ≥8 字即拦截，不看英文比例。针对 Questie/DBM 等中英混合插件播报（R6 比例规则漏过），避免中文→中文空转。"),
     };
 
     private static string ConfigPath =>
