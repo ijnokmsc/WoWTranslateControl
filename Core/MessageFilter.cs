@@ -43,11 +43,17 @@ public static class MessageFilter
     // 实测教训：ph.wt 是插件替换【所有】超链接的占位符，玩家聊天里发物品链接同样会带
     // （如 "： lf tank http://ph.wt/1"、"： LFM a Tank and a DPS http://ph.wt/1"）。
     // 一旦把它当过滤关键词，真实英文聊天会被误杀，游戏里就看不到译文了。
-    // 因此 R4 只依据中文播报固定词判定 —— 这些词只出现在系统播报里。
+    // 因此 R4 只依据系统播报固定句式判定 —— 这些句式只出现在系统播报里。
+    // 2026-09-11 游戏实测补充：英文客户端的拾取播报是英文固定句式
+    //   （"X automatically passes on [item], because X cannot loot that item."），
+    //   中文关键词根本匹配不上，导致整队放弃拾取刷屏全部送模型。补英文句式。
     private static readonly Regex ReLoot = new(
         @"获得了物品|赢得了|放弃了|拾取了|贪婪|需求|掷点|制造了|分解了|" +
-        @"被解散了|获得了\s*\d+\s*点|本次售卖共获利",
-        RegexOptions.Compiled);
+        @"被解散了|获得了\s*\d+\s*点|本次售卖共获利|" +
+        @"automatically passes on|cannot loot that item|cannot collect that item|" +
+        @"receive[sd]? loot|wins? the roll|won the roll|rolls? (Need|Greed)|" +
+        @"need before greed|may roll for",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     // ---- R5 伤害/死亡/表情/经验播报 ----
     // 覆盖各种伤害类型（物理/掉落/火焰/…）与近战命中播报。

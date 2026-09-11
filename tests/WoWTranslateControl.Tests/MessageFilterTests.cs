@@ -51,6 +51,11 @@ public class MessageFilterTests
     [Theory]
     [InlineData("你获得了物品：雷霆之剑")]
     [InlineData("Brick 赢得了 掷点 88 (需求)")]
+    [InlineData("Runetang automatically passes on Yuna's Bag because she cannot loot that item")]
+    [InlineData("Manahorn automatically passes on Yuna's Bag, because he cannot loot that item.")]
+    [InlineData("You receive loot: 雷霆之剑")]
+    [InlineData("Brick wins the roll 88 vs 12")]
+    [InlineData("Calyi rolls Greed 34")]
     public void R4_拾取播报_被拦截(string content)
     {
         var d = MessageFilter.Classify(content, Cfg());
@@ -71,6 +76,8 @@ public class MessageFilterTests
     [InlineData("LFM a Tank and a DPS http://ph.wt/1")]
     [InlineData("anyone knows where the quest npc is?")]
     [InlineData("brb 中")]                                     // 极短中英混合，字母数超过 R6 阈值，放行
+    [InlineData("w me for invite raid new world bosses")]     // 2026-09-11 游戏实测：R4 英文词不得误杀真实组队聊天
+    [InlineData("pass me the flask pls")]                     // "pass" 单独出现不匹配 "passes on"
     public void 玩家聊天_放行(string content)
     {
         var d = MessageFilter.Classify(content, Cfg());
