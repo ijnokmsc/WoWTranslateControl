@@ -372,8 +372,14 @@ public sealed class ProxyServer : IDisposable
         // 背景：WoWTranslate335.dll 在入站路径把原生 UTF-8 中文逐字转成 '?'（宽字符→ANSI
         // 转换特征），英文请求→中文译文同样损坏（"BOSS" 存活、中文全灭）。若 DLL 的 JSON
         // 解析器认识 \u 转义（走十六进制→宽字符路径，不经 ANSI 转换），此改动即绕过损坏；
-        // 若仍为 ?，则损坏在 DLL 宽字符→ANSI 输出层，只能靠 Track B 自有 DLL 根治。
-        var payload = Encoding.UTF8.GetBytes(BuildOpenAiResponse(finalText));
+        // 2026-09-11 晚实测结论：\uXXXX 转义试验失败——DLL 解码层不认 \uXXXX，
+        // 游戏内中文全部变 ?（与原生 UTF-8 同样损坏）。两种编码都过不了 DLL 入站层，
+        // 说明损坏在 DLL 宽字符→ANSI 输出层，服务器侧无解，只能 Track B 自有 DLL 根治。
+        // 恢复原生 UTF-8 透传：行为与 v1 python 代理一致，且插件 Lua 词库仍可在
+        // 残存 ASCII（如 BOSS）上做术语替换。模型路径透传 llama 原始响应体。
+        var payload = kind == TrafficKind.Model
+            ? Encoding.UTF8.GetBytes(reply.RawBody)
+            : Encoding.UTF8.GetBytes(BuildOpenAiResponse(finalText));
         await SendRawAsync(stream, 200, payload, "application/json", keepAlive, ct)
             .ConfigureAwait(false);
     }
