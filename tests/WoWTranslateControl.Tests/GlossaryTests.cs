@@ -24,20 +24,54 @@ public class GlossaryApplierTests
     }
 
     [Fact]
-    public void ph_wt_占位符_绝不参与替换()
+    public void ph_wt_占位符_送模型前必须保护()
     {
-        var (text, _) = GlossaryApplier.Apply("lf tank http://ph.wt/1", Entries);
-        Assert.Contains("http://ph.wt/1", text); // 占位符原样保留
-        Assert.Contains("⟦G4⟧", text);           // tank 被替换
+        // 2026-09-11 游戏实测：模型看到 http://ph.wt/1 会篡改，保护段必须穿透模型调用
+        var (text, map) = GlossaryApplier.Apply("lf tank http://ph.wt/1", Entries);
+        Assert.Contains("⟦P0⟧", text);
+        Assert.DoesNotContain("http://ph.wt/1", text); // 模型不能看到原始占位符
+        Assert.Contains("⟦G4⟧", text);                 // tank 被替换
+        Assert.Equal("http://ph.wt/1", map["⟦P0⟧"]);
     }
 
     [Fact]
     public void WoW超链接_被保护_不被术语污染()
     {
         var link = "|Hitem:19019:0:0:0:0:0:0:0:0:0|h[Thunderfury]|h";
-        var (text, _) = GlossaryApplier.Apply($"check {link} nice tank", Entries);
-        Assert.Contains(link, text);   // 链接原样保留
-        Assert.Contains("⟦G4⟧", text); // tank 被替换
+        var (text, map) = GlossaryApplier.Apply($"check {link} nice tank", Entries);
+        Assert.DoesNotContain("|Hitem:", text);  // 模型看不到标记
+        Assert.Contains("⟦P0⟧", text);
+        Assert.Contains("⟦G4⟧", text);
+        Assert.Equal(link, map["⟦P0⟧"]);
+    }
+
+    [Fact]
+    public void 包裹链接_整体摘成一个保护段()
+    {
+        // 游戏实测样本：|cff...DDhttp://ph.wt/1|r 是插件给物品链接的完整包装，
+        // 若按零散形态摘成 |cff0070DD⟦P0⟧|r 三段，模型仍会篡改碎片
+        var (text, map) = GlossaryApplier.Apply("|cff0070DDhttp://ph.wt/1|r ya", Entries);
+        Assert.Equal("⟦P0⟧ ya", text);
+        Assert.Equal("|cff0070DDhttp://ph.wt/1|r", map["⟦P0⟧"]);
+    }
+
+    [Fact]
+    public void 保护段_穿透模型后完整还原()
+    {
+        var (text, map) = GlossaryApplier.Apply("|cff0070DDhttp://ph.wt/1|r ya", Entries);
+        Assert.Equal("⟦P0⟧ ya", text);
+        // 模拟模型只翻译了 ya
+        var (restored, all) = GlossaryApplier.Restore("⟦P0⟧ 好", map);
+        Assert.True(all);
+        Assert.Equal("|cff0070DDhttp://ph.wt/1|r 好", restored);
+    }
+
+    [Fact]
+    public void 词表关闭时_保护段依然生效()
+    {
+        var (text, map) = GlossaryApplier.Apply("check http://ph.wt/2", null!);
+        Assert.Equal("check ⟦P0⟧", text);
+        Assert.Equal("http://ph.wt/2", map["⟦P0⟧"]);
     }
 
     [Fact]

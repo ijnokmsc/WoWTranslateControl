@@ -23,15 +23,19 @@ public sealed class GlossaryStage : IMessageStage
 
     public Task<PipelineResult?> ProcessAsync(TranslationContext ctx, CancellationToken ct)
     {
-        if (!_cfg.GlossaryEnabled || _store.Count == 0)
-            return Task.FromResult<PipelineResult?>(null);
+        // ⚠️ 即使术语表关闭也必须执行：⟦P⟧ 保护段（链接/标记不送模型）依赖本阶段。
+        // 2026-09-11 游戏实测：模型看到 |cff0070DDhttp://ph.wt/1|r 会篡改标记，
+        // 把系统标签 [HC] 翻成 [英雄模式]——保护必须无条件生效。
+        var entries = _cfg.GlossaryEnabled && _store.Count > 0
+            ? _store.Snapshot()
+            : null;
 
-        var (newText, map) = GlossaryApplier.Apply(ctx.Text, _store.Snapshot());
-        if (map.Count > 0)
+        var (newText, map) = GlossaryApplier.Apply(ctx.Text, entries);
+        if (newText != ctx.Text || map.Count > 0)
         {
             ctx.Text = newText;
             ctx.GlossaryMap = map;
-            ctx.GlossaryApplied = true;
+            ctx.GlossaryApplied = map.Count > 0;
         }
         return Task.FromResult<PipelineResult?>(null);
     }
