@@ -448,6 +448,10 @@
                                     Click="BtnClearTraffic_Click" Padding="10,4" />
                             <CheckBox x:Name="ChkAutoScroll" Content="自动滚动" IsChecked="True"
                                       Margin="12,0,0,0" VerticalAlignment="Center" />
+                            <CheckBox x:Name="ChkOnlyChannel" Content="只看频道聊天"
+                                      Checked="ChkOnlyChannel_Changed" Unchecked="ChkOnlyChannel_Changed"
+                                      Margin="12,0,0,0" VerticalAlignment="Center"
+                                      ToolTip="只显示带频道标签的聊天消息（说/公会/队伍…），隐藏战斗日志、拾取播报、伤亡播报等系统信息" />
                         </StackPanel>
 
                         <DataGrid Grid.Row="1" x:Name="TrafficGrid" AutoGenerateColumns="False"

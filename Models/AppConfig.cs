@@ -169,6 +169,9 @@ public sealed class AppConfig
     /// <summary>流量列表最多保留多少行，防止长时间挂机后 UI 卡顿或内存增长。</summary>
     public int LogMaxRows { get; set; } = 400;
 
+    /// <summary>实时流量列表只显示带频道标签的聊天消息（隐藏战斗/拾取/伤亡等系统播报）。</summary>
+    public bool TrafficOnlyChannel { get; set; } = false;
+
     /// <summary>是否把过滤与转发明细写入文件日志。</summary>
     public bool WriteFileLog { get; set; } = true;
 

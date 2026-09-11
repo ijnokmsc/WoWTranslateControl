@@ -21,6 +21,8 @@ public sealed class TrafficRow
     public string RuleName { get; init; } = "";
     public string Content { get; init; } = "";
     public int ElapsedMs { get; init; }
+    /// <summary>聊天频道名（GUILD/SAY…）；null = 无频道标签的系统播报。</summary>
+    public string? Channel { get; init; }
 }
 
 /// <summary>规则命中统计行。</summary>
@@ -171,6 +173,7 @@ public partial class MainWindow : Window
         TxtMaxTokens.Text = _cfg.MaxTokensCeil.ToString();
 
         ChkAutoStart.IsChecked = _cfg.AutoStartLlama && _cfg.ProxyAutoStart;
+        ChkOnlyChannel.IsChecked = _cfg.TrafficOnlyChannel;
         ChkR1.IsChecked = _cfg.RuleIconSpam;
         ChkR2.IsChecked = _cfg.RuleSpellLog;
         ChkR3.IsChecked = _cfg.RuleCombatOther;
@@ -573,11 +576,23 @@ public partial class MainWindow : Window
         _ => true
     };
 
+    /// <summary>「只看频道聊天」：无频道标签的行（战斗日志/拾取/伤亡等系统播报）一律隐藏。</summary>
+    private bool MatchesRow(TrafficRow r)
+        => MatchesFilter(r.KindName) && (ChkOnlyChannel.IsChecked != true || r.Channel != null);
+
+    private void ChkOnlyChannel_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        _cfg.TrafficOnlyChannel = ChkOnlyChannel.IsChecked == true;
+        _cfg.Save();
+        RebuildView();
+    }
+
     private void RebuildView()
     {
         _view.Clear();
         foreach (var r in _allRows)
-            if (MatchesFilter(r.KindName)) _view.Add(r);
+            if (MatchesRow(r)) _view.Add(r);
     }
 
     // ==================== 定时刷新 ====================
@@ -611,13 +626,14 @@ public partial class MainWindow : Window
                     RuleId = en.RuleId,
                     RuleName = en.RuleName,
                     Content = en.Content,
-                    ElapsedMs = en.ElapsedMs
+                    ElapsedMs = en.ElapsedMs,
+                    Channel = en.Channel
                 };
 
                 _allRows.Add(row);
                 while (_allRows.Count > _cfg.LogMaxRows) _allRows.RemoveAt(0);
 
-                if (MatchesFilter(kind))
+                if (MatchesRow(row))
                 {
                     _view.Add(row);
                     while (_view.Count > _cfg.LogMaxRows) _view.RemoveAt(0);

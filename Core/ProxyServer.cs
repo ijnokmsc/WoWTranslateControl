@@ -32,7 +32,8 @@ public sealed record TrafficEntry(
     string RuleId,
     string RuleName,
     string Content,
-    int ElapsedMs);
+    int ElapsedMs,
+    string? Channel = null);
 
 /// <summary>
 /// 本地翻译代理（v2：管线驱动）。
@@ -368,7 +369,7 @@ public sealed class ProxyServer : IDisposable
         }
 
         Emit(kind, ruleId, ruleName, kind == TrafficKind.UpstreamError
-            ? $"{ctx.OriginalText} | {reply.Error}" : ctx.OriginalText, sw);
+            ? $"{ctx.OriginalText} | {reply.Error}" : ctx.OriginalText, sw, channel);
 
         // 2026-09-11 游戏实测：模型路径不再透传 llama 的原生 UTF-8 响应体，统一走
         // BuildOpenAiResponse（默认转义器把非 ASCII 写成 \uXXXX 纯 ASCII）。
@@ -535,11 +536,11 @@ public sealed class ProxyServer : IDisposable
     }
 
     private void Emit(TrafficKind kind, string ruleId, string ruleName, string content,
-        Stopwatch sw)
+        Stopwatch sw, string? channel = null)
     {
         sw.Stop();
         var entry = new TrafficEntry(DateTime.Now, kind, ruleId, ruleName,
-            Truncate(content, 160), (int)sw.ElapsedMilliseconds);
+            Truncate(content, 160), (int)sw.ElapsedMilliseconds, channel);
         OnTraffic?.Invoke(entry);
     }
 
