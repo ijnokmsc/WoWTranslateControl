@@ -1,0 +1,25 @@
+# 构建产物
+bin/
+obj/
+publish/
+artifacts/
+
+# IDE / 临时
+.vs/
+*.user
+*.suo
+.nunit/
+
+# 运行时生成
+crash.log
+*.log
+settings.json
+glossary.json
+
+# 冒烟截图产物
+tools/WoWTranslateControlSmoke/bin/
+tools/WoWTranslateControlSmoke/obj/
+
+# 系统杂项
+nul
+Thumbs.db

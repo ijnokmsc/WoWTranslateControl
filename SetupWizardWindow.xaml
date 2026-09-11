@@ -1,0 +1,103 @@
+<Window x:Class="WoWTranslateControl.SetupWizardWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="环境检测与下载向导 — llama.cpp / 模型推荐"
+        Width="760" Height="600"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource BgBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="12.5">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- 硬件概况 -->
+        <Border Grid.Row="0" Background="{StaticResource PanelBrush}" CornerRadius="6"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                Padding="12" Margin="0,0,0,10">
+            <StackPanel>
+                <TextBlock Text="本机环境" Style="{StaticResource CardTitle}" />
+                <TextBlock x:Name="TxtHardware" TextWrapping="Wrap"
+                           Style="{StaticResource Dim}"
+                           Text="正在检测硬件…" />
+                <TextBlock x:Name="TxtAdvice" TextWrapping="Wrap" Margin="0,6,0,0"
+                           Foreground="{StaticResource OkBrush}" Text="" />
+            </StackPanel>
+        </Border>
+
+        <!-- llama.cpp -->
+        <Border Grid.Row="1" Background="{StaticResource PanelBrush}" CornerRadius="6"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                Padding="12" Margin="0,0,0,10">
+            <StackPanel>
+                <TextBlock Text="llama.cpp 运行时" Style="{StaticResource CardTitle}" />
+                <StackPanel Orientation="Horizontal">
+                    <ComboBox x:Name="CmbBuild" Width="480" VerticalAlignment="Center">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding AssetName}" TextTrimming="CharacterEllipsis" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <Button x:Name="BtnRefreshBuilds" Content="刷新列表" Margin="8,0,0,0"
+                            Padding="10,4" Click="BtnRefreshBuilds_Click" />
+                    <Button x:Name="BtnDownloadBuild" Content="下载到 llama 目录"
+                            Style="{StaticResource PrimaryBtn}" Margin="8,0,0,0"
+                            Padding="10,4" Click="BtnDownloadBuild_Click" />
+                </StackPanel>
+                <TextBlock x:Name="TxtBuildNote" Style="{StaticResource Dim}" Margin="0,6,0,0"
+                           TextWrapping="Wrap"
+                           Text="列表来自 GitHub 最新 Release。CUDA 版需同时下载 cudart 运行库并解压到同一目录。" />
+            </StackPanel>
+        </Border>
+
+        <!-- 模型 -->
+        <Border Grid.Row="2" Background="{StaticResource PanelBrush}" CornerRadius="6"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                Padding="12" Margin="0,0,0,10">
+            <StackPanel>
+                <TextBlock Text="翻译模型（hf-mirror 镜像）" Style="{StaticResource CardTitle}" />
+                <StackPanel Orientation="Horizontal">
+                    <ComboBox x:Name="CmbModel" Width="480" VerticalAlignment="Center">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <Button x:Name="BtnDownloadModel" Content="下载模型"
+                            Style="{StaticResource PrimaryBtn}" Margin="8,0,0,0"
+                            Padding="10,4" Click="BtnDownloadModel_Click" />
+                    <Button x:Name="BtnApplyModel" Content="应用此模型"
+                            Margin="8,0,0,0" Padding="10,4"
+                            Click="BtnApplyModel_Click" IsEnabled="False" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- 进度与日志 -->
+        <Border Grid.Row="3" Background="{StaticResource PanelBrush}" CornerRadius="6"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                Padding="12">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <ProgressBar Grid.Row="0" x:Name="Progress" Height="16"
+                             Minimum="0" Maximum="100" />
+                <TextBox Grid.Row="1" x:Name="TxtLog" Margin="0,8,0,0" IsReadOnly="True"
+                         TextWrapping="Wrap" FontFamily="Consolas" FontSize="11.5"
+                         VerticalScrollBarVisibility="Auto"
+                         Background="#FF101016" BorderBrush="{StaticResource BorderBrush}" />
+            </Grid>
+        </Border>
+
+        <TextBlock Grid.Row="4" x:Name="TxtStatus" Margin="0,8,0,0"
+                   Style="{StaticResource Dim}" Text="就绪" />
+    </Grid>
+</Window>

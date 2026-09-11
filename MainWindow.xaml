@@ -1,0 +1,692 @@
+<Window x:Class="WoWTranslateControl.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="WoWTranslate 控制台 — 消息过滤 / llama-server 管理"
+        Height="760" Width="1240" MinHeight="620" MinWidth="1000"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource BgBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="12.5">
+
+    <Window.Resources>
+        <!-- 流量类型着色 -->
+        <Style x:Key="KindText" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding KindName}" Value="已过滤">
+                    <Setter Property="Foreground" Value="{StaticResource WarnBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding KindName}" Value="缓存">
+                    <Setter Property="Foreground" Value="#FF9575CD" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding KindName}" Value="模型">
+                    <Setter Property="Foreground" Value="{StaticResource OkBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding KindName}" Value="错误">
+                    <Setter Property="Foreground" Value="{StaticResource ErrBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding KindName}" Value="请求异常">
+                    <Setter Property="Foreground" Value="{StaticResource ErrBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="RuleChip" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+            <Setter Property="FontFamily" Value="Consolas, Microsoft YaHei UI" />
+        </Style>
+
+        <Style x:Key="StatNum" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="22" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="StatLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextDimBrush}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,2,0,0" />
+        </Style>
+
+        <Style x:Key="FieldLabel" TargetType="TextBlock" BasedOn="{StaticResource Dim}">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ========== 顶部状态条 ========== -->
+        <Border Grid.Row="0" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                CornerRadius="6" Padding="12,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="0,0,22,0">
+                    <Ellipse x:Name="LlamaDot" Width="10" Height="10"
+                             Fill="{StaticResource ErrBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="llama-server" Margin="7,0,0,0" FontWeight="SemiBold" />
+                    <TextBlock x:Name="LlamaStateText" Text=" 已停止"
+                               Margin="4,0,0,0" Foreground="{StaticResource TextDimBrush}" />
+                    <TextBlock x:Name="LlamaPidText" Text="" Margin="8,0,0,0"
+                               Foreground="{StaticResource TextDimBrush}" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,0,22,0">
+                    <Ellipse x:Name="ProxyDot" Width="10" Height="10"
+                             Fill="{StaticResource ErrBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="过滤代理" Margin="7,0,0,0" FontWeight="SemiBold" />
+                    <TextBlock x:Name="ProxyStateText" Text=" 已停止"
+                               Margin="4,0,0,0" Foreground="{StaticResource TextDimBrush}" />
+                    <TextBlock x:Name="ProxyPortText" Text="" Margin="8,0,0,0"
+                               Foreground="{StaticResource TextDimBrush}" />
+                </StackPanel>
+
+                <TextBlock Grid.Column="2" x:Name="HintText" VerticalAlignment="Center"
+                           Foreground="{StaticResource TextDimBrush}" TextWrapping="Wrap"
+                           Text="插件端点保持 http://127.0.0.1:8080/v1/chat/completions 不变。" />
+
+                <TextBlock Grid.Column="3" VerticalAlignment="Center"
+                           Foreground="{StaticResource TextDimBrush}">
+                    <Run Text="运行时长 " /><Run x:Name="UptimeText" Text="00:00:00" />
+                </TextBlock>
+            </Grid>
+        </Border>
+
+        <!-- ========== 中部主体 ========== -->
+        <Grid Grid.Row="1" Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="370" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 左：控制面板 -->
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,10,0">
+                <StackPanel>
+
+                    <!-- 服务控制 -->
+                    <Border Background="{StaticResource PanelBrush}" CornerRadius="6"
+                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                            Padding="12" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="服务控制" Style="{StaticResource CardTitle}" />
+                            <UniformGrid Columns="2">
+                                <Button x:Name="BtnStartLlama" Content="启动 llama-server"
+                                        Style="{StaticResource PrimaryBtn}" Margin="0,0,4,0"
+                                        Click="BtnStartLlama_Click" />
+                                <Button x:Name="BtnStopLlama" Content="停止 llama-server"
+                                        Style="{StaticResource DangerBtn}" Margin="4,0,0,0"
+                                        Click="BtnStopLlama_Click" IsEnabled="False" />
+                            </UniformGrid>
+                            <UniformGrid Columns="2" Margin="0,6,0,0">
+                                <Button x:Name="BtnStartProxy" Content="启动过滤代理"
+                                        Style="{StaticResource PrimaryBtn}" Margin="0,0,4,0"
+                                        Click="BtnStartProxy_Click" />
+                                <Button x:Name="BtnStopProxy" Content="停止过滤代理"
+                                        Style="{StaticResource DangerBtn}" Margin="4,0,0,0"
+                                        Click="BtnStopProxy_Click" IsEnabled="False" />
+                            </UniformGrid>
+                            <Button x:Name="BtnStartAll" Content="一键启动全部（服务 + 代理）"
+                                    Margin="0,8,0,0" Click="BtnStartAll_Click" />
+                            <Button x:Name="BtnWizard" Content="环境检测与下载向导（llama / 模型推荐）"
+                                    Margin="0,6,0,0" Click="BtnWizard_Click" />
+                            <CheckBox x:Name="ChkAutoStart" Content="程序启动时自动拉起全部服务"
+                                      Margin="0,8,0,0" Checked="ChkAutoStart_Changed"
+                                      Unchecked="ChkAutoStart_Changed" />
+                            <CheckBox x:Name="ChkTray" Content="最小化/关闭时缩到托盘（双击还原）"
+                                      Margin="0,6,0,0" Checked="Tray_Changed"
+                                      Unchecked="Tray_Changed" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 过滤规则 -->
+                    <Border Background="{StaticResource PanelBrush}" CornerRadius="6"
+                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                            Padding="12" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="过滤规则（命中即不进模型，直接回显原文）"
+                                       Style="{StaticResource CardTitle}" TextWrapping="Wrap" />
+
+                            <CheckBox x:Name="ChkR1" Content="R1  图标刷屏（RaidTargetingIcon）"
+                                      Checked="Rule_Changed" Unchecked="Rule_Changed" />
+                            <TextBlock Style="{StaticResource Dim}" Margin="22,0,0,6"
+                                       TextWrapping="Wrap"
+                                       Text="实测占比 27.1%，仅 10 条唯一内容重复 184 次" />
+
+                            <CheckBox x:Name="ChkR2" Content="R2  战斗日志（SPELL_*）"
+                                      Checked="Rule_Changed" Unchecked="Rule_Changed" />
+                            <TextBlock Style="{StaticResource Dim}" Margin="22,0,0,6"
+                                       TextWrapping="Wrap"
+                                       Text="实测占比 50.6%，最大单一类别" />
+
+                            <CheckBox x:Name="ChkR3" Content="R3  其他战斗事件（SWING_/RANGE_）"
+                                      Checked="Rule_Changed" Unchecked="Rule_Changed" />
+
+                            <CheckBox x:Name="ChkR4" Content="R4  拾取播报（获得了物品/赢得了）"
+                                      Checked="Rule_Changed" Unchecked="Rule_Changed" />
+                            <TextBlock Style="{StaticResource Dim}" Margin="22,0,0,6"
+                                       TextWrapping="Wrap" Text="实测占比 10.7%" />
+
+                            <CheckBox x:Name="ChkR5" Content="R5  伤害死亡播报（杀死了/点伤害）"
+                                      Checked="Rule_Changed" Unchecked="Rule_Changed" />
+
+                            <CheckBox x:Name="ChkR6" Content="R6  中文为主兜底（启发式，可关）"
+                                      Checked="Rule_Changed" Unchecked="Rule_Changed" />
+                            <TextBlock Style="{StaticResource Dim}" Margin="22,0,0,4"
+                                       TextWrapping="Wrap"
+                                       Text="剥离标记后中文占主导则跳过。可能误伤极短中英混合消息。" />
+
+                            <Grid Margin="22,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="阈值" Style="{StaticResource Dim}"
+                                           VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <Slider Grid.Column="1" x:Name="SliderRatio" Minimum="0.5"
+                                        Maximum="6" TickFrequency="0.5"
+                                        IsSnapToTickEnabled="True"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="SliderRatio_ValueChanged" />
+                                <TextBlock Grid.Column="2" x:Name="RatioText" Text="2.0"
+                                           Style="{StaticResource Dim}" VerticalAlignment="Center"
+                                           Margin="6,0,0,0" Width="26" />
+                            </Grid>
+
+                            <Separator Margin="0,4,0,8" Background="{StaticResource BorderBrush}" />
+
+                            <!-- 频道过滤 C0-C8（设计参照插件内建面板：综合/喊话/密语/队伍/公会/团队/战场/世界本地） -->
+                            <TextBlock Text="按频道过滤（C0-C8）"
+                                       Style="{StaticResource CardTitle}" />
+                            <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,6"
+                                       TextWrapping="Wrap"
+                                       Text="取消勾选的频道直接回显原文、不进模型。频道标签由插件 Lua 补丁以 \1频道\1 前缀搭车上报（DLL 原生 API 不传频道）。" />
+                            <CheckBox x:Name="ChkChanEnabled" Content="启用频道过滤"
+                                      Checked="Channel_Changed" Unchecked="Channel_Changed" />
+                            <UniformGrid Columns="3" Margin="0,2,0,0">
+                                <CheckBox x:Name="ChkChanSay" Content="综合" />
+                                <CheckBox x:Name="ChkChanYell" Content="喊话" />
+                                <CheckBox x:Name="ChkChanWhisper" Content="密语" />
+                                <CheckBox x:Name="ChkChanParty" Content="队伍" />
+                                <CheckBox x:Name="ChkChanGuild" Content="公会" />
+                                <CheckBox x:Name="ChkChanRaid" Content="团队" />
+                                <CheckBox x:Name="ChkChanBg" Content="战场" />
+                                <CheckBox x:Name="ChkChanWorld" Content="世界/本地" />
+                                <CheckBox x:Name="ChkChanUntagged" Content="未标记" />
+                            </UniformGrid>
+                            <TextBlock Style="{StaticResource Dim}" Margin="0,4,0,0"
+                                       TextWrapping="Wrap"
+                                       Text="开关变更即时生效；「一键配置插件」可把这里的选择同步进插件游戏内频道设置。" />
+
+                            <Separator Margin="0,4,0,8" Background="{StaticResource BorderBrush}" />
+                            <CheckBox x:Name="ChkCache" Content="启用响应缓存（吃掉 3.9 倍重复请求）"
+                                      Checked="Cache_Changed" Unchecked="Cache_Changed" />
+                            <Button x:Name="BtnClearCache" Content="清空缓存" Margin="0,6,0,0"
+                                    Click="BtnClearCache_Click" />
+                            <Button x:Name="BtnGlossary" Content="术语表管理" Margin="0,6,0,0"
+                                    Click="BtnGlossary_Click" />
+                            <Button x:Name="BtnResetStats" Content="重置统计计数" Margin="0,6,0,0"
+                                    Click="BtnResetStats_Click" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 推理参数 -->
+                    <Border Background="{StaticResource PanelBrush}" CornerRadius="6"
+                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                            Padding="12" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="推理参数" Style="{StaticResource CardTitle}" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="llama 目录"
+                                           Style="{StaticResource FieldLabel}" />
+                                <TextBox Grid.Row="0" Grid.Column="1" x:Name="TxtLlamaDir"
+                                         Margin="0,3" />
+
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="模型文件"
+                                           Style="{StaticResource FieldLabel}" />
+                                <TextBox Grid.Row="1" Grid.Column="1" x:Name="TxtModel"
+                                         Margin="0,3" />
+
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="线程数 -t"
+                                           Style="{StaticResource FieldLabel}" />
+                                <TextBox Grid.Row="2" Grid.Column="1" x:Name="TxtThreads"
+                                         Margin="0,3" />
+
+                                <TextBlock Grid.Row="3" Grid.Column="0" Text="上下文 -c"
+                                           Style="{StaticResource FieldLabel}" />
+                                <TextBox Grid.Row="3" Grid.Column="1" x:Name="TxtContext"
+                                         Margin="0,3" />
+
+                                <TextBlock Grid.Row="4" Grid.Column="0" Text="上游端口"
+                                           Style="{StaticResource FieldLabel}" />
+                                <TextBox Grid.Row="4" Grid.Column="1" x:Name="TxtUpstreamPort"
+                                         Margin="0,3" />
+
+                                <TextBlock Grid.Row="5" Grid.Column="0" Text="监听端口"
+                                           Style="{StaticResource FieldLabel}" />
+                                <TextBox Grid.Row="5" Grid.Column="1" x:Name="TxtListenPort"
+                                         Margin="0,3" />
+
+                                <TextBlock Grid.Row="6" Grid.Column="0" Text="token 上限"
+                                           Style="{StaticResource FieldLabel}" />
+                                <TextBox Grid.Row="6" Grid.Column="1" x:Name="TxtMaxTokens"
+                                         Margin="0,3" />
+                            </Grid>
+                            <TextBlock Style="{StaticResource Dim}" Margin="0,6,0,0"
+                                       TextWrapping="Wrap"
+                                       Text="本机为 14 物理核 / 28 逻辑核，-t 20 属合理配置，无需下调。修改后需重启 llama-server 生效。" />
+                            <Button x:Name="BtnSaveCfg" Content="保存配置" Margin="0,8,0,0"
+                                    Click="BtnSaveCfg_Click" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 翻译服务（需求 5：第三方翻译/推理 API） -->
+                    <Border Background="{StaticResource PanelBrush}" CornerRadius="6"
+                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                            Padding="12" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="翻译服务（Provider）" Style="{StaticResource CardTitle}" />
+                            <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,6"
+                                       TextWrapping="Wrap"
+                                       Text="插件永远只看到本地端点，切换 Provider 对游戏侧透明。auto = 按链路故障转移，全部失败时回显原文。" />
+                            <ComboBox x:Name="CmbProvider" Width="300" HorizontalAlignment="Left"
+                                      SelectionChanged="CmbProvider_SelectionChanged">
+                                <ComboBoxItem Content="本地 llama-server" Tag="local" />
+                                <ComboBoxItem Content="OpenAI 兼容 API（第三方）" Tag="openai" />
+                                <ComboBoxItem Content="谷歌免费翻译（无需密钥）" Tag="google" />
+                                <ComboBoxItem Content="自动故障转移 llama → OpenAI → 谷歌" Tag="auto" />
+                            </ComboBox>
+
+                            <TextBlock x:Name="LblOpenAi" Text="OpenAI 兼容端点 / 密钥 / 模型："
+                                       Style="{StaticResource Dim}" Margin="0,8,0,2" />
+                            <TextBox x:Name="TxtOpenAiEndpoint" Margin="0,2"
+                                     ToolTip="完整 URL，含 /v1/chat/completions" />
+                            <TextBox x:Name="TxtOpenAiKey" Margin="0,2"
+                                     ToolTip="API 密钥（明文保存在本机 settings.json）" />
+                            <TextBox x:Name="TxtOpenAiModel" Margin="0,2" />
+
+                            <TextBlock x:Name="LblGoogle" Text="谷歌免费翻译 语言对："
+                                       Style="{StaticResource Dim}" Margin="0,8,0,2" />
+                            <StackPanel Orientation="Horizontal">
+                                <TextBox x:Name="TxtGoogleSl" Width="110" Text="auto" />
+                                <TextBlock Text=" → " VerticalAlignment="Center" />
+                                <TextBox x:Name="TxtGoogleTl" Width="110" Text="zh-CN" />
+                            </StackPanel>
+
+                            <TextBlock Text="系统提示词（送模型的翻译指令，随 settings.json 本地保存）"
+                                       Style="{StaticResource Dim}" Margin="0,10,0,2" />
+                            <TextBox x:Name="TxtSystemPrompt" AcceptsReturn="True"
+                                     TextWrapping="Wrap" Height="88"
+                                     VerticalScrollBarVisibility="Auto"
+                                     FontSize="11" ToolTip="修改后点「保存配置」生效" />
+                            <StackPanel Orientation="Horizontal">
+                                <Button x:Name="BtnResetPrompt" Content="恢复默认提示词"
+                                        Margin="0,4,0,0" Click="BtnResetPrompt_Click" />
+                            </StackPanel>
+
+                            <Button x:Name="BtnTestProvider" Content="测试当前翻译服务"
+                                    Margin="0,8,0,0" Click="BtnTestProvider_Click" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 插件一键配置（需求 8） -->
+                    <Border Background="{StaticResource PanelBrush}" CornerRadius="6"
+                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                            Padding="12" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="插件一键配置" Style="{StaticResource CardTitle}" />
+                            <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,6"
+                                       TextWrapping="Wrap"
+                                       Text="写 WoWTranslate.ini（DLL 优先读取）+ SavedVariables 指向本地代理；可选注入频道标签 Lua 补丁。Wow.exe 运行时拒绝执行（防 SavedVariables 被覆盖）。" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="游戏目录"
+                                           Style="{StaticResource FieldLabel}" />
+                                <TextBox Grid.Column="1" x:Name="TxtGameDir" Margin="0,3" />
+                                <Button Grid.Column="2" x:Name="BtnBrowseGameDir" Content="浏览…"
+                                        Margin="6,3,0,0" Padding="8,3"
+                                        Click="BtnBrowseGameDir_Click" />
+                            </Grid>
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                <CheckBox x:Name="ChkPatchLua" Content="注入频道标签 Lua 补丁"
+                                          IsChecked="True" Margin="0,0,14,0" />
+                                <CheckBox x:Name="ChkSyncChannels" Content="同步频道开关到插件"
+                                          IsChecked="True" />
+                            </StackPanel>
+                            <Button x:Name="BtnConfigurePlugin" Content="一键配置插件"
+                                    Style="{StaticResource PrimaryBtn}" Margin="0,8,0,0"
+                                    Click="BtnConfigurePlugin_Click" />
+                            <TextBlock x:Name="TxtPluginReport" Style="{StaticResource Dim}"
+                                       Margin="0,6,0,0" TextWrapping="Wrap" Text="" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 插件 DLL 轨道切换（ADR-007 双轨并行） -->
+                    <Border Background="{StaticResource PanelBrush}" CornerRadius="6"
+                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                            Padding="12" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="插件 DLL 轨道切换" Style="{StaticResource CardTitle}" />
+                            <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,6"
+                                       TextWrapping="Wrap"
+                                       Text="Track A = 现役 GS 插件（成熟）；Track B = 自有 Direct DLL（实验，直接获取消息）。切换只动游戏根目录 DLL 文件，首次切换自动留存原始基线备份，Wow.exe 运行时拒绝执行。" />
+                            <TextBlock x:Name="TxtDllStatus" Style="{StaticResource Dim}"
+                                       Margin="0,0,0,6" TextWrapping="Wrap" Text="正在检测…" />
+                            <ComboBox x:Name="CmbDllTrack" Width="320" HorizontalAlignment="Left"
+                                      SelectionChanged="CmbDllTrack_SelectionChanged">
+                                <ComboBoxItem Content="Track A — WoWTranslate GS（现役）" Tag="gs" />
+                                <ComboBoxItem Content="Track B — 自有 Direct DLL（实验）" Tag="direct" />
+                            </ComboBox>
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <Button x:Name="BtnSwitchDll" Content="切换到此轨道"
+                                        Style="{StaticResource PrimaryBtn}" Padding="14,4"
+                                        Click="BtnSwitchDll_Click" />
+                                <Button x:Name="BtnRefreshDll" Content="刷新状态"
+                                        Margin="8,0,0,0" Padding="14,4"
+                                        Click="BtnRefreshDll_Click" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- 右：标签页 -->
+            <TabControl Grid.Column="1" Background="{StaticResource PanelBrush}"
+                        BorderBrush="{StaticResource BorderBrush}">
+
+                <!-- 实时流量 -->
+                <TabItem Header="实时流量">
+                    <Grid Margin="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="2,2,2,8">
+                            <TextBlock Style="{StaticResource Dim}" Text="筛选："
+                                       VerticalAlignment="Center" />
+                            <ComboBox x:Name="CmbFilter" Width="130" Margin="4,0,10,0"
+                                      SelectionChanged="CmbFilter_SelectionChanged">
+                                <ComboBoxItem Content="全部" IsSelected="True" />
+                                <ComboBoxItem Content="已过滤" />
+                                <ComboBoxItem Content="缓存命中" />
+                                <ComboBoxItem Content="模型翻译" />
+                                <ComboBoxItem Content="错误" />
+                            </ComboBox>
+                            <Button x:Name="BtnClearTraffic" Content="清空列表"
+                                    Click="BtnClearTraffic_Click" Padding="10,4" />
+                            <CheckBox x:Name="ChkAutoScroll" Content="自动滚动" IsChecked="True"
+                                      Margin="12,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
+
+                        <DataGrid Grid.Row="1" x:Name="TrafficGrid" AutoGenerateColumns="False"
+                                  IsReadOnly="True" HeadersVisibility="Column"
+                                  Background="Transparent" BorderBrush="{StaticResource BorderBrush}"
+                                  RowBackground="Transparent" AlternatingRowBackground="#FF1B1B22"
+                                  GridLinesVisibility="Horizontal"
+                                  HorizontalGridLinesBrush="#FF2A2A33"
+                                  Foreground="{StaticResource TextBrush}"
+                                  CanUserAddRows="False" CanUserDeleteRows="False"
+                                  SelectionMode="Extended" FontSize="12"
+                                  VirtualizingPanel.IsVirtualizing="True"
+                                  VirtualizingPanel.VirtualizationMode="Recycling"
+                                  ScrollViewer.CanContentScroll="True">
+                            <DataGrid.ColumnHeaderStyle>
+                                <Style TargetType="DataGridColumnHeader">
+                                    <Setter Property="Background" Value="{StaticResource PanelAltBrush}" />
+                                    <Setter Property="Foreground" Value="{StaticResource TextDimBrush}" />
+                                    <Setter Property="Padding" Value="6,5" />
+                                    <Setter Property="FontWeight" Value="SemiBold" />
+                                    <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+                                    <Setter Property="BorderThickness" Value="0,0,1,1" />
+                                </Style>
+                            </DataGrid.ColumnHeaderStyle>
+                            <DataGrid.RowStyle>
+                                <Style TargetType="DataGridRow">
+                                    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                                </Style>
+                            </DataGrid.RowStyle>
+                            <DataGrid.CellStyle>
+                                <Style TargetType="DataGridCell">
+                                    <Setter Property="BorderThickness" Value="0" />
+                                    <Setter Property="Padding" Value="6,3" />
+                                    <Setter Property="Background" Value="Transparent" />
+                                    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                                    <Style.Triggers>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter Property="Background" Value="#FF2D4A5C" />
+                                            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </DataGrid.CellStyle>
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="时间" Binding="{Binding TimeText}" Width="78" />
+                                <DataGridTextColumn Header="类型" Binding="{Binding KindName}" Width="72">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource KindText}" />
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="规则" Binding="{Binding RuleId}" Width="52">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource RuleChip}" />
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="分类" Binding="{Binding RuleName}" Width="120" />
+                                <DataGridTextColumn Header="耗时ms" Binding="{Binding ElapsedMs}" Width="66" />
+                                <DataGridTextColumn Header="消息内容" Binding="{Binding Content}" Width="*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                </TabItem>
+
+                <!-- 统计 -->
+                <TabItem Header="统计">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="12">
+                            <TextBlock Text="流量统计" Style="{StaticResource CardTitle}" />
+
+                            <UniformGrid Columns="5" Margin="0,4,0,14">
+                                <Border Background="{StaticResource PanelAltBrush}" CornerRadius="6"
+                                        Padding="10" Margin="0,0,4,0">
+                                    <StackPanel>
+                                        <TextBlock x:Name="StatTotal" Text="0"
+                                                   Style="{StaticResource StatNum}" />
+                                        <TextBlock Text="总请求" Style="{StaticResource StatLabel}" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Background="{StaticResource PanelAltBrush}" CornerRadius="6"
+                                        Padding="10" Margin="4,0">
+                                    <StackPanel>
+                                        <TextBlock x:Name="StatFiltered" Text="0"
+                                                   Style="{StaticResource StatNum}"
+                                                   Foreground="{StaticResource WarnBrush}" />
+                                        <TextBlock Text="已过滤" Style="{StaticResource StatLabel}" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Background="{StaticResource PanelAltBrush}" CornerRadius="6"
+                                        Padding="10" Margin="4,0">
+                                    <StackPanel>
+                                        <TextBlock x:Name="StatCache" Text="0"
+                                                   Style="{StaticResource StatNum}"
+                                                   Foreground="#FF9575CD" />
+                                        <TextBlock Text="缓存命中" Style="{StaticResource StatLabel}" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Background="{StaticResource PanelAltBrush}" CornerRadius="6"
+                                        Padding="10" Margin="4,0">
+                                    <StackPanel>
+                                        <TextBlock x:Name="StatModel" Text="0"
+                                                   Style="{StaticResource StatNum}"
+                                                   Foreground="{StaticResource OkBrush}" />
+                                        <TextBlock Text="走模型" Style="{StaticResource StatLabel}" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Background="{StaticResource PanelAltBrush}" CornerRadius="6"
+                                        Padding="10" Margin="4,0,0,0">
+                                    <StackPanel>
+                                        <TextBlock x:Name="StatError" Text="0"
+                                                   Style="{StaticResource StatNum}"
+                                                   Foreground="{StaticResource ErrBrush}" />
+                                        <TextBlock Text="错误" Style="{StaticResource StatLabel}" />
+                                    </StackPanel>
+                                </Border>
+                            </UniformGrid>
+
+                            <Border Background="{StaticResource PanelAltBrush}" CornerRadius="6"
+                                    Padding="14" Margin="0,0,0,12">
+                                <StackPanel>
+                                    <TextBlock Text="模型负载削减比例"
+                                               Style="{StaticResource Dim}" />
+                                    <TextBlock x:Name="StatSaved" Text="—" FontSize="34"
+                                               FontWeight="Bold"
+                                               Foreground="{StaticResource OkBrush}"
+                                               Margin="0,4,0,2" />
+                                    <TextBlock x:Name="StatSavedDetail" Style="{StaticResource Dim}"
+                                               TextWrapping="Wrap"
+                                               Text="未走模型的请求占比。日志基线：680 条请求中 609 条(88.6%)为系统噪音。" />
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="按规则命中分布" Style="{StaticResource CardTitle}" />
+                            <ItemsControl x:Name="RuleStatsList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,3">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="60" />
+                                                <ColumnDefinition Width="150" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="90" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="{Binding RuleId}"
+                                                       Style="{StaticResource RuleChip}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding RuleName}" />
+                                            <Border Grid.Column="2" Background="#FF14141A"
+                                                    CornerRadius="3" Height="14"
+                                                    VerticalAlignment="Center">
+                                                <Rectangle Fill="{StaticResource AccentBrush}"
+                                                           HorizontalAlignment="Left"
+                                                           RadiusX="3" RadiusY="3"
+                                                           Width="{Binding BarWidth}" />
+                                            </Border>
+                                            <TextBlock Grid.Column="3" Text="{Binding CountText}"
+                                                       Foreground="{StaticResource TextDimBrush}"
+                                                       TextAlignment="Right" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <TextBlock Text="缓存状态" Style="{StaticResource CardTitle}"
+                                       Margin="0,16,0,4" />
+                            <TextBlock x:Name="StatCacheInfo" Style="{StaticResource Dim}"
+                                       Text="缓存条目：0" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+                <!-- llama 输出 -->
+                <TabItem Header="llama-server 输出">
+                    <Grid Margin="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="2,2,2,8">
+                            <Button x:Name="BtnClearOutput" Content="清空" Padding="10,4"
+                                    Click="BtnClearOutput_Click" />
+                            <CheckBox x:Name="ChkFollowOutput" Content="自动跟随" IsChecked="True"
+                                      Margin="12,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <TextBox Grid.Row="1" x:Name="TxtOutput" IsReadOnly="True"
+                                 TextWrapping="NoWrap" FontFamily="Consolas"
+                                 FontSize="11.5" VerticalScrollBarVisibility="Auto"
+                                 HorizontalScrollBarVisibility="Auto"
+                                 Background="#FF101016" BorderBrush="{StaticResource BorderBrush}" />
+                    </Grid>
+                </TabItem>
+
+                <!-- 事件日志 -->
+                <TabItem Header="事件日志">
+                    <Grid Margin="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Button Grid.Row="0" x:Name="BtnClearLog" Content="清空" Padding="10,4"
+                                Margin="2,2,2,8" HorizontalAlignment="Left"
+                                Click="BtnClearLog_Click" />
+                        <TextBox Grid.Row="1" x:Name="TxtLog" IsReadOnly="True"
+                                 TextWrapping="Wrap" FontSize="11.5"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Background="#FF101016" BorderBrush="{StaticResource BorderBrush}" />
+                    </Grid>
+                </TabItem>
+
+            </TabControl>
+        </Grid>
+
+        <!-- ========== 底部统计条 ========== -->
+        <Border Grid.Row="2" Background="{StaticResource PanelBrush}" Margin="0,10,0,0"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                CornerRadius="6" Padding="12,7">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource Dim}" Text="总计 " />
+                    <TextBlock x:Name="BarTotal" Text="0" FontWeight="SemiBold" Margin="0,0,12,0" />
+                    <TextBlock Style="{StaticResource Dim}" Text="已过滤 " />
+                    <TextBlock x:Name="BarFiltered" Text="0" FontWeight="SemiBold"
+                               Foreground="{StaticResource WarnBrush}" Margin="0,0,12,0" />
+                    <TextBlock Style="{StaticResource Dim}" Text="缓存 " />
+                    <TextBlock x:Name="BarCache" Text="0" FontWeight="SemiBold"
+                               Foreground="#FF9575CD" Margin="0,0,12,0" />
+                    <TextBlock Style="{StaticResource Dim}" Text="走模型 " />
+                    <TextBlock x:Name="BarModel" Text="0" FontWeight="SemiBold"
+                               Foreground="{StaticResource OkBrush}" Margin="0,0,12,0" />
+                    <TextBlock Style="{StaticResource Dim}" Text="错误 " />
+                    <TextBlock x:Name="BarError" Text="0" FontWeight="SemiBold"
+                               Foreground="{StaticResource ErrBrush}" />
+                </StackPanel>
+                <TextBlock Grid.Column="2" x:Name="BarSaved" Style="{StaticResource Dim}"
+                           Text="模型负载削减 —" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
