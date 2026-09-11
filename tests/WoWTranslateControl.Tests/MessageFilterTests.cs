@@ -72,6 +72,16 @@ public class MessageFilterTests
     }
 
     [Theory]
+    [InlineData("： |cffFF2020http://ph.wt/1|r 我觉得是血")]   // 2026-09-11 游戏实测：链接占位符+纯中文
+    [InlineData("： |cffFF2020http://ph.wt/1|r 但是冰莲")]
+    public void R6_系统链接加中文_剥离标记后拦截(string content)
+    {
+        var d = MessageFilter.Classify(content, Cfg());
+        Assert.True(d.Filtered);
+        Assert.Equal("R6", d.RuleId);
+    }
+
+    [Theory]
     [InlineData("????? [Yuna's Bag] ????????????")]          // DLL 编码损坏产物
     [InlineData("? ???? [Nicholastang]")]                     // 游戏实测：分散 1+4 连，最大段 4 也要拦
     public void R7_乱码兜底_被拦截(string content)
