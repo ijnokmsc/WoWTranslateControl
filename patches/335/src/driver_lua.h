@@ -97,7 +97,7 @@ local pending, counter = {}, 0
 
 -- v19 诊断旗标（各只回报一次，进 DLL 日志定位链路断点）
 local dbgHooked, dbgCapture, dbgCjk = false, false, false
-local dbgQueueErr, dbgTransOk, dbgTransErr, dbgTimeout = false, false, false, false
+local dbgQueueErr, dbgTransOk, dbgTransErr, dbgTimeout, dbgDisplayed = false, false, false, false, false
 
 local function HasLatin(t)
   return string.find(t, "%a") ~= nil
@@ -257,8 +257,11 @@ local function HandleIncoming(frame, orig, text, r, g, b, id, hold)
   end
   if not dbgCapture then
     dbgCapture = true
+    -- 取证：原始 AddMessage 全文（含超链接原始字节，定位 ?频道? 之类乱码来源）
+    WoWTranslate_Diag("WTC_RAW ch=" .. tostring(curChannel) ..
+      " text=" .. string.sub(text, 1, 200))
     WoWTranslate_Diag("WTC_CAPTURE ch=" .. tostring(curChannel) ..
-      " send=" .. string.sub(toSend, 1, 40))
+      " send=" .. string.sub(toSend, 1, 60))
   end
   counter = counter + 1
   local mid = tostring(counter)
@@ -342,6 +345,10 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
           WoWTranslate_Diag("WTC_TRANSOK id=" .. id)
         end
         local finalText = Reconstruct(p.segs, tr)
+        if not dbgDisplayed then
+          dbgDisplayed = true
+          WoWTranslate_Diag("WTC_DISPLAY final=" .. string.sub(finalText, 1, 200))
+        end
         if displayMode == "both" then
           p.orig(p.frame, dispPrefix .. finalText, p.r, p.g, p.b, p.id, p.hold)
         else

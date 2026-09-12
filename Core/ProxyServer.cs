@@ -342,6 +342,8 @@ public sealed class ProxyServer : IDisposable
 
         // ---- Provider（llama / OpenAI 兼容 / 谷歌免费，按模式与故障转移链）----
         var reply = await _providers.TranslateAsync(ctx, ct).ConfigureAwait(false);
+        if (_cfg.WriteFileLog)
+            WriteTrafficLog(channel, "[REPLY:" + (reply.Ok ? "OK" : "FAIL") + "] " + reply.Translated, null);
 
         string finalText;
         TrafficKind kind;
@@ -395,11 +397,13 @@ public sealed class ProxyServer : IDisposable
     /// 将 DLL 发来的请求原文与原始报文 hex 追加到 proxy_traffic.log。
     /// 诊断插件编码损坏的唯一铁证：能看出 DLL 到底发的是 UTF-8 中文、\uXXXX 还是 '?????'。
     /// </summary>
-    private static void WriteTrafficLog(string? channel, string text, byte[] rawBody)
+    private static void WriteTrafficLog(string? channel, string text, byte[]? rawBody)
     {
         try
         {
-            var hex = string.Concat(rawBody.Take(120).Select(b => b.ToString("x2")));
+            var hex = rawBody == null
+                ? "-"
+                : string.Concat(rawBody.Take(120).Select(b => b.ToString("x2")));
             var line = $"{DateTime.Now:HH:mm:ss.fff}\t{(channel ?? "-")}\t{text.Replace('\n', ' ')}\tHEX:{hex}\n";
             lock (_trafficLogLock)
                 File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "proxy_traffic.log"), line, new System.Text.UTF8Encoding(false));
