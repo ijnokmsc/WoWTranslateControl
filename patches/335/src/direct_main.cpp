@@ -261,11 +261,12 @@ WT_NOINLINE static bool TryRegister(lua_State* L)
 
 // detour 辅助（在 Lua 主线程上跑，必须快、无分配、异常兜底）
 //
-// ⚠ 一次性策略（对齐 GS 原版行为）：
-// 客户端存在多个内部 lua_State（日志实测出现 8 个不同 L）。绝不能对每个新 L
-// 都 pushcclosure/setfield —— 那会在任意调用线程的非 UI 状态上修改全局表，
-// 绕过 Lua 单线程锁假设，实测把 GlueXML 加载打断（AccountLogin.lua ShowScene
-// nil → 登录界面崩溃）。首个捕获的 L 即 UI 主状态，注册一次后永久直通。
+// ⚠ GS 精确复刻（对齐其 79MB 日志实测行为）：
+// 1. stackUsed 门禁：读 L->top(+0xC) / L->base(+0x10)（GS 从 gettop 字节码推导的
+//    同款偏移）。stackUsed<=0 = 干净边界/初始化中的内部状态 —— 在那里注册会破坏
+//    半成品的 Lua 环境（实测 GlueXML 加载被打断 → ShowScene nil 崩溃）。
+//    只在真实脚本调用上下文（stackUsed>0）锁定并注册。GS 实测锁定值 stackUsed=16。
+// 2. one-shot：注册一次后永久直通，绝不对任何其他 L 重复注册。
 static volatile LONG g_registerDone = 0;
 
 static void OnGetTop(lua_State* L)
@@ -275,8 +276,13 @@ static void OnGetTop(lua_State* L)
 
     if (L == g_registeredL) return;
 
+    // stackUsed 门禁（GS 同款：top=+0xC base=+0x10）
+    DWORD top  = *(DWORD*)((BYTE*)L + 0xC);
+    DWORD base = *(DWORD*)((BYTE*)L + 0x10);
+    if (top <= base) return;               // 干净边界/未就绪状态 → 等真实脚本调用
+
     LONG n = InterlockedIncrement(&g_attemptCount);
-    if (n > 32)                            // 防失控：前 32 个 L 里没注册成就放弃
+    if (n > 32)                            // 防失控：前 32 个候选里没注册成就放弃
     {
         InterlockedExchange(&g_registerDone, 1);
         WT_LOG_ERROR("give up registering after 32 candidate L values");
@@ -287,7 +293,11 @@ static void OnGetTop(lua_State* L)
     {
         g_registeredL = L;
         InterlockedExchange(&g_registerDone, 1);
-        WT_LOG_INFO("WoWTranslate_* registered into _G (one-shot, L locked)");
+        char buf[96];
+        _snprintf(buf, sizeof(buf),
+                  "WoWTranslate_* registered into _G (one-shot, L=0x%08X stackUsed=%u)",
+                  (unsigned)(uintptr_t)L, (unsigned)(top - base));
+        WT_LOG_INFO(buf);
     }
 }
 
