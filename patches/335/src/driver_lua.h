@@ -220,7 +220,20 @@ local function JsonGetString(json, key)
       elseif nc == "n" then out = out .. "\n"
       elseif nc == "r" then out = out .. "\r"
       elseif nc == "t" then out = out .. "\t"
-      elseif nc == "u" then out = out .. "?" ; j = j + 4
+      elseif nc == "u" then
+        -- \uXXXX → UTF-8 裸字节（纵深防御：即使服务端转义也能正确显示，v23 前是丢弃成 ?）
+        local cp = tonumber(string.sub(json, j + 2, j + 5), 16)
+        if cp and cp >= 32 then
+          if cp < 0x80 then
+            out = out .. string.char(cp)
+          elseif cp < 0x800 then
+            out = out .. string.char(0xC0 + math.floor(cp / 64), 0x80 + cp % 64)
+          else
+            out = out .. string.char(0xE0 + math.floor(cp / 4096),
+              0x80 + math.floor(cp / 64) % 64, 0x80 + cp % 64)
+          end
+        end
+        j = j + 4
       else out = out .. nc end
       j = j + 2
     elseif ch == "\"" then

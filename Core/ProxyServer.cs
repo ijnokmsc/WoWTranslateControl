@@ -373,19 +373,13 @@ public sealed class ProxyServer : IDisposable
         Emit(kind, ruleId, ruleName, kind == TrafficKind.UpstreamError
             ? $"{ctx.OriginalText} | {reply.Error}" : ctx.OriginalText, sw, channel);
 
-        // 2026-09-11 游戏实测：模型路径不再透传 llama 的原生 UTF-8 响应体，统一走
-        // BuildOpenAiResponse（默认转义器把非 ASCII 写成 \uXXXX 纯 ASCII）。
-        // 背景：WoWTranslate335.dll 在入站路径把原生 UTF-8 中文逐字转成 '?'（宽字符→ANSI
-        // 转换特征），英文请求→中文译文同样损坏（"BOSS" 存活、中文全灭）。若 DLL 的 JSON
-        // 解析器认识 \u 转义（走十六进制→宽字符路径，不经 ANSI 转换），此改动即绕过损坏；
-        // 2026-09-11 晚实测结论：\uXXXX 转义试验失败——DLL 解码层不认 \uXXXX，
-        // 游戏内中文全部变 ?（与原生 UTF-8 同样损坏）。两种编码都过不了 DLL 入站层，
-        // 说明损坏在 DLL 宽字符→ANSI 输出层，服务器侧无解，只能 Track B 自有 DLL 根治。
-        // 恢复原生 UTF-8 透传：行为与 v1 python 代理一致，且插件 Lua 词库仍可在
-        // 残存 ASCII（如 BOSS）上做术语替换。模型路径透传 llama 原始响应体。
-        var payload = kind == TrafficKind.Model
-            ? Encoding.UTF8.GetBytes(reply.RawBody)
-            : Encoding.UTF8.GetBytes(BuildOpenAiResponse(finalText));
+        // 2026-09-12 Track B 定案：模型路径也走 BuildOpenAiResponse——但必须携带术语还原后
+        // 的 finalText（旧逻辑透传上游 RawBody，⟦Gn⟧ 占位符原样进游戏，如 "⟦G11⟧ 用于 WB"）。
+        // UTF-8 透传由 BuildOpenAiResponse 的 UnsafeRelaxedJsonEscaping 保证（非 ASCII 不转义，
+        // Track B DLL 是原生 UTF-8 通道）。\uXXXX 转义方案对 GS DLL 的失败实验见下史：
+        // WoWTranslate335.dll 入站层把中文逐字转 '?'（宽字符→ANSI），\uXXXX 与原生 UTF-8
+        // 同样过不了，只能 Track B 自有 DLL 根治——GS DLL 已不在 Track B 部署内。
+        var payload = Encoding.UTF8.GetBytes(BuildOpenAiResponse(finalText));
         await SendRawAsync(stream, 200, payload, "application/json", keepAlive, ct)
             .ConfigureAwait(false);
     }
@@ -485,7 +479,12 @@ public sealed class ProxyServer : IDisposable
     private static string BuildOpenAiResponse(string translated)
     {
         using var ms = new MemoryStream();
-        using (var w = new Utf8JsonWriter(ms))
+        // UnsafeRelaxedJsonEscaping：非 ASCII（中文）保持原生 UTF-8，不写 \uXXXX——
+        // Track B DLL 的 JSON 解析按 UTF-8 裸字节透传，\u 会显示成 ?
+        using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions
+        {
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        }))
         {
             w.WriteStartObject();
             w.WriteString("id", "chatcmpl-wtc");

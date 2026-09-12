@@ -91,7 +91,10 @@ public sealed class CacheStage : IMessageStage, IDisposable
 
     internal string BuildKey(TranslationContext ctx)
     {
+        // kv2：v22 前频道标签曾泄漏进模型（译文带 ?频道? 幻觉前缀）并被缓存，key 加版本
+        // 号让历史脏条目全部自然失效，不清文件。
         var raw = string.Join('\x1f',
+            "kv2",
             ctx.Text,
             ctx.Config.InTargetLang,
             _glossary.Version.ToString(),
