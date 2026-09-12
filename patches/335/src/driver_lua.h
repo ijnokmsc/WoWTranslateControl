@@ -58,8 +58,13 @@ inline std::string LuaEscape(const std::string& s)
 inline const char* DriverLuaCode()
 {
     return R"WTCDRIVER(
-if not WTC_DRIVER_LOADED then
+-- v17 就绪门禁：FrameXML 未加载完（NUM_CHAT_WINDOWS/ChatFrame1/DEFAULT_CHAT_FRAME/
+-- ChatFrame_OnEvent 任一为 nil）时静默返回，C++ 侧 500ms 后重试；绝不抛 Lua 错误——
+-- v16 崩溃根因之一就是注入过早导致 chunk 运行时错误。
+if not WTC_DRIVER_LOADED and NUM_CHAT_WINDOWS and DEFAULT_CHAT_FRAME and ChatFrame_OnEvent and ChatFrame1 then
 WTC_DRIVER_LOADED = true
+
+local function WTC_MAIN()
 
 -- ---- 中和旧 WoWTranslate 插件（其 API 层依赖 GS DLL 的 UnitXP 桥）----
 if UnitXP == nil then
@@ -325,10 +330,15 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
   end
 end)
 
-if DEFAULT_CHAT_FRAME then
-  DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r Direct driver v16 loaded (mode=" ..
-    displayMode .. (displayMode == "both" and (", prefix=" .. dispPrefix) or "") .. ")")
-end
+DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r Direct driver v17 loaded (mode=" ..
+  displayMode .. (displayMode == "both" and (", prefix=" .. dispPrefix) or "") .. ")")
+
+end  -- WTC_MAIN
+
+-- pcall 包裹：任何 Lua 错误都被限制在本 chunk 内（错误消息经合法 chunkname 格式化，
+-- 客户端栈保持平衡），结果经 Diag 回报 C++（决定重试还是完成）
+local ok, err = pcall(WTC_MAIN)
+WoWTranslate_Diag(ok and "WTC_DRIVER_OK" or ("WTC_DRIVER_FAIL: " .. tostring(err)))
 
 end
 )WTCDRIVER";

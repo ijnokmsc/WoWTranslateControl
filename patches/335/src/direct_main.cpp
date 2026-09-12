@@ -237,9 +237,21 @@ WT_NOINLINE static int L_PendingCount(lua_State* L)
     __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
 }
 
-// ---- Diag: () → 诊断串（GS DLL 有同名函数，Addon 可选用）----
+// ---- Diag: ([msg]) → 诊断串；v17：驱动 chunk 用它向 C++ 回报注入结果 ----
+// 约定：Lua 侧最后一步调用 WoWTranslate_Diag("WTC_DRIVER_OK" | "WTC_DRIVER_FAIL: 原因")。
+static volatile LONG g_driverReported = 0;   // 见到 WTC_DRIVER_OK 置 1（TryInjectDriver 消费）
+
 WT_NOINLINE static int L_Diag_impl(lua_State* L)
 {
+    if (p_isstring(L, 1))
+    {
+        const char* msg = p_tolstring(L, 1, NULL);
+        std::string m = msg ? msg : "";
+        if (m == "WTC_DRIVER_OK")
+            InterlockedExchange(&g_driverReported, 1);
+        WT_LOG_INFO(std::string("diag: ") + m);   // 失败原因（Lua err）直接进日志
+        return PushResult(L, "ok");
+    }
     return PushResult(L, "WoWTranslateDirect: hook=active, registered=1");
 }
 WT_NOINLINE static int L_Diag(lua_State* L)
@@ -405,8 +417,18 @@ static std::string g_displayMode   = "replace";   // "replace" | "both"
 static std::string g_displayPrefix = "[译]";      // UTF-8（客户端为 UTF-8 通道）
 
 static std::string g_driverChunk;                 // 配置前缀 + 驱动 Lua，InitThread 组装
-static volatile LONG g_driverDone = 0;            // 一次性：无论成败只注入一次
+static volatile LONG g_driverDone = 0;            // 注入成功（或放弃）后置 1
 static volatile LONG g_driverBusy = 0;            // 重入保护（FrameScript_Execute 内部会再触发 gettop）
+static volatile LONG g_driverAttempts = 0;        // 重试计数
+static volatile DWORD g_driverNextTick = 0;       // 下次允许尝试的 tick（500ms 节流）
+
+#define DRIVER_MAX_ATTEMPTS 600                   // 500ms 节流下约 5 分钟，足够等 FrameXML
+
+// 客户端 /run 处理器（sub_510B30）的同款传法：sub_819210(code, code, 0xAC804C)
+// —— a2 是 luaL_loadbuffer 的 chunk 名（客户端直接复用代码指针），传别的值时任何
+// Lua 错误消息格式化都会把它当 char* 解引用 → AV（v16 崩溃根因之一）；
+// a3 是客户端静态错误处理器指针，原样照抄。
+#define FRAME_SCRIPT_ERR_HANDLER 0xAC804C
 
 // SEH 执行体单独成函数（C2712：__try 所在函数禁止 std::string 临时量等需展开对象）
 static int ExecuteDriverChunk()
@@ -414,7 +436,9 @@ static int ExecuteDriverChunk()
     int rc = -1;
     __try
     {
-        rc = p_Execute(g_driverChunk.c_str(), (int)g_driverChunk.size(), 0);
+        rc = p_Execute(g_driverChunk.c_str(),
+                       (int)(intptr_t)g_driverChunk.c_str(),   // a2 = chunk 名（客户端同款：复用代码指针）
+                       FRAME_SCRIPT_ERR_HANDLER);
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
     {
@@ -423,12 +447,22 @@ static int ExecuteDriverChunk()
     return rc;
 }
 
-// 注册成功后，在 gettop detour（Lua 主线程）内等待 depth==0 干净边界一次性执行。
+// 注册成功后，在 gettop detour（Lua 主线程）内等待 depth==0 干净边界注入。
 // ⚠ 绝不能在 InitThread 等非主线程调 FrameScript_Execute —— Lua 状态非线程安全。
+// v17：chunk 带就绪门禁（UI 未就绪时静默返回，绝不抛 Lua 错误），只有 chunk 调
+// WoWTranslate_Diag("WTC_DRIVER_OK") 才算成功；否则 500ms 后重试直到上限。
 static void TryInjectDriver(lua_State* L)
 {
     if (g_driverDone) return;
     if (InterlockedCompareExchange(&g_driverBusy, 1, 0) != 0) return;
+
+    DWORD now = GetTickCount();
+    if (now < g_driverNextTick)                   // 节流：失败后至少间隔 500ms
+    {
+        InterlockedExchange(&g_driverBusy, 0);
+        return;
+    }
+    InterlockedExchange(&g_driverNextTick, now + 500);
 
     int depth = ((fn_lua_gettop)g_pTrampoline)(L);
     if (depth != 0)                               // 只在空栈边界注入
@@ -437,13 +471,43 @@ static void TryInjectDriver(lua_State* L)
         return;
     }
 
+    InterlockedExchange(&g_driverReported, 0);
     int rc = ExecuteDriverChunk();
-    InterlockedExchange(&g_driverDone, 1);
-    InterlockedExchange(&g_driverBusy, 0);
 
-    char buf[128];
-    _snprintf(buf, sizeof(buf), "driver lua injected rc=%d chunkLen=%d", rc, (int)g_driverChunk.size());
-    if (rc >= 0) WT_LOG_INFO(buf); else WT_LOG_ERROR(buf);
+    char buf[160];
+    if (rc != 0)
+    {
+        // rc=-2：SEH。合法 chunkname/handler 下不应发生；发生了就停手（状态存疑，别再试）
+        InterlockedExchange(&g_driverDone, 1);
+        InterlockedExchange(&g_driverBusy, 0);
+        _snprintf(buf, sizeof(buf), "driver inject SEH rc=%d attempt=%d - stopped",
+                  rc, (int)g_driverAttempts + 1);
+        WT_LOG_ERROR(buf);
+        return;
+    }
+    if (g_driverReported)
+    {
+        InterlockedExchange(&g_driverDone, 1);
+        InterlockedExchange(&g_driverBusy, 0);
+        _snprintf(buf, sizeof(buf), "driver lua loaded OK (attempt=%d chunkLen=%d)",
+                  (int)g_driverAttempts + 1, (int)g_driverChunk.size());
+        WT_LOG_INFO(buf);
+        return;
+    }
+
+    // 未就绪/未回报 → 保留 g_driverDone=0，下个空栈边界再试
+    InterlockedExchange(&g_driverBusy, 0);
+    LONG n = InterlockedIncrement(&g_driverAttempts);
+    if (n == 1 || n % 40 == 0)
+    {
+        _snprintf(buf, sizeof(buf), "driver not ready yet, attempt=%d (see diag lines above)", (int)n);
+        WT_LOG_INFO(buf);
+    }
+    if (n >= DRIVER_MAX_ATTEMPTS)
+    {
+        InterlockedExchange(&g_driverDone, 1);
+        WT_LOG_ERROR("driver inject gave up after max attempts (FrameXML never became ready?)");
+    }
 }
 
 static void OnGetTop(lua_State* L)
@@ -469,6 +533,7 @@ static void OnGetTop(lua_State* L)
         WT_LOG_INFO(buf);
         // /reload → 新 Lua 状态（旧驱动的 hook/帧随旧状态销毁）→ 重注驱动
         InterlockedExchange(&g_driverDone, 0);
+        InterlockedExchange(&g_driverAttempts, 0);
     }
 
     // 调原函数（trampoline）拿真实栈深：top - base
