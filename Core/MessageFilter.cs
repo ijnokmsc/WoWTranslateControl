@@ -74,8 +74,9 @@ public static class MessageFilter
     private static readonly Regex ReLatin = new(@"[A-Za-z]", RegexOptions.Compiled);
 
     // ---- 频道标签：插件 Lua 补丁在文本前加 \1<频道>\1，控制台无条件剥离并据此过滤 ----
+    // [A-Z0-9_]：v24 外发翻译用 ZH2EN 作频道名，含数字
     private static readonly Regex ReChannelTag =
-        new(@"^\x01([A-Z_]+)\x01", RegexOptions.Compiled);
+        new(@"^\x01([A-Z0-9_]+)\x01", RegexOptions.Compiled);
 
     /// <summary>
     /// 解析并剥离频道标签前缀（\1CH\1）。无论频道过滤开关与否都必须剥离——

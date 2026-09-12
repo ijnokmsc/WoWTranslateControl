@@ -139,3 +139,22 @@ public class MessageFilterTests
         Assert.Equal("R0", d.RuleId);
     }
 }
+
+public class ChannelTagDigitTests
+{
+    [Fact]
+    public void ZH2EN标签_含数字_能解析并剥离()
+    {
+        var ch = MessageFilter.ParseChannelTag("\x01ZH2EN\x01测试消息", out var clean);
+        Assert.Equal("ZH2EN", ch);
+        Assert.Equal("测试消息", clean);
+    }
+
+    [Fact]
+    public void 旧纯字母标签_仍正常解析()
+    {
+        var ch = MessageFilter.ParseChannelTag("\x01SAY\x01hello", out var clean);
+        Assert.Equal("SAY", ch);
+        Assert.Equal("hello", clean);
+    }
+}
