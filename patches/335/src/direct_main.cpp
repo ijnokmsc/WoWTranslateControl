@@ -465,7 +465,10 @@ static void TryInjectDriver(lua_State* L)
     InterlockedExchange(&g_driverNextTick, now + 500);
 
     int depth = ((fn_lua_gettop)g_pTrampoline)(L);
-    if (depth != 0)                               // 只在空栈边界注入
+    if (depth > 2)                                // 与注册同窗口（0..2）。FrameScript_Execute
+                                                  // 内部 pcall 建新调用帧，不触碰调用方栈；
+                                                  // ⚠ 世界状态里 depth==0 几乎等不到（v17 实测
+                                                  // 登录页能注入、进世界后永远等不到），故放宽
     {
         InterlockedExchange(&g_driverBusy, 0);
         return;
@@ -583,6 +586,9 @@ static void OnGetTop(lua_State* L)
                   "readback_tt=%d informational) verify=OK",
                   (unsigned)(uintptr_t)L, depth, depthAfter, (int)g_ttA_ver);
         WT_LOG_INFO(buf);
+        // v18：注册完立即尝试注入（窗口内大概率可执行；UI 未就绪由 chunk 门禁 + 重试兜底）。
+        // v17 教训：只等 depth==0 空栈边界，世界状态永远等不到 → 驱动进了世界后失效。
+        TryInjectDriver(L);
     }
 }
 
