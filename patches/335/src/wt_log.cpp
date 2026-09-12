@@ -6,10 +6,16 @@ namespace wt {
 
 static CRITICAL_SECTION g_logCs;
 static bool g_logReady = false;
+static volatile LONG g_logEnabled = 1;   // 配置 "log": false 可关闭（wtSetLogEnabled）
 static HANDLE g_logFile = NULL;
 static HMODULE g_hSelf = NULL; // 引擎 DLL 自身模块句柄（DllMain 传入）
 
 void wtSetSelfModule(HMODULE h) { g_hSelf = h; }
+
+void wtSetLogEnabled(bool enabled)
+{
+    InterlockedExchange(&g_logEnabled, enabled ? 1 : 0);
+}
 
 static void GetLogPath(wchar_t (&path)[MAX_PATH])
 {
@@ -43,14 +49,22 @@ void LogInit()
         CloseHandle(hProbe);
     }
 
-    g_logFile = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ, NULL,
-                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 }
 
 void LogWrite(const char* level, const std::string& msg)
 {
+    if (!g_logEnabled) return;                 // 配置关闭：不初始化、不写、不创建文件
     if (!g_logReady) LogInit();
-    if (!g_logReady || g_logFile == INVALID_HANDLE_VALUE || g_logFile == NULL) return;
+    if (!g_logReady) return;
+    if (g_logFile == INVALID_HANDLE_VALUE || g_logFile == NULL)
+    {
+        wchar_t path[MAX_PATH];
+        GetLogPath(path);
+        if (!path[0]) { g_logReady = false; return; }
+        g_logFile = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ, NULL,
+                                OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (g_logFile == INVALID_HANDLE_VALUE) { g_logReady = false; return; }
+    }
 
     SYSTEMTIME st;
     GetLocalTime(&st);

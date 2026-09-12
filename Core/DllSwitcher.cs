@@ -111,7 +111,8 @@ public sealed class DllSwitcher
             $"  \"endpoint\": \"http://127.0.0.1:{listenPort}/v1/chat/completions\",\n" +
             $"  \"displayMode\": \"{displayMode}\",\n" +
             $"  \"displayPrefix\": \"{EscapeJson(displayPrefix ?? "[译]")}\",\n" +
-            $"  \"outgoingMode\": \"{outgoingMode}\"\n" +
+            $"  \"outgoingMode\": \"{outgoingMode}\",\n" +
+            $"  \"log\": true\n" +
             "}\n";
         var path = Path.Combine(gameDir, "WoWTranslateDirect.json");
         File.WriteAllText(path, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
@@ -299,6 +300,57 @@ public sealed class DllSwitcher
         {
             lines.Add($"  ⚠ 轨道备份失败：{ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// 启动时版本自愈：Track B 部署中且游戏未运行时，比对游戏目录两个 DLL 与本地
+    /// 资产的 MD5，不一致（控制台更新后忘了重新部署/手工拷贝错版本）则自动重部署。
+    /// </summary>
+    public static List<string> EnsureUpToDate(string gameDir, string directAssetsDir,
+        Func<bool>? wowRunning = null)
+    {
+        var lines = new List<string>();
+        try
+        {
+            var status = Probe(gameDir, directAssetsDir);
+            if (status.Current != TrackDirect || !status.DirectAssetsReady)
+                return lines;   // 非 Track B 部署：不做校验
+
+            if (wowRunning?.Invoke() ?? PluginConfigurator.IsWowRunning())
+            {
+                lines.Add("ℹ 检测到 Wow.exe 正在运行，DLL 版本校验跳过（下次启动控制台时再比对）。");
+                return lines;
+            }
+
+            var drifted = new List<string>();
+            foreach (var f in new[] { "dinput8.dll", "WoWTranslateDirect.dll" })
+            {
+                var game = Path.Combine(gameDir, f);
+                var asset = Path.Combine(status.DirectAssetsDir, f);
+                if (!File.Exists(game) || !File.Exists(asset)) continue;
+                if (!SameHash(game, asset)) drifted.Add(f);
+            }
+
+            if (drifted.Count == 0) return lines;
+
+            foreach (var f in drifted)
+                File.Copy(Path.Combine(status.DirectAssetsDir, f), Path.Combine(gameDir, f), overwrite: true);
+            lines.Add($"✔ 游戏目录 DLL 与本地资产版本不一致（{string.Join("、", drifted)}），已自动重新部署。" +
+                      "下次启动游戏生效。");
+        }
+        catch (Exception ex)
+        {
+            lines.Add($"⚠ DLL 版本校验失败：{ex.Message}");
+        }
+        return lines;
+    }
+
+    private static bool SameHash(string a, string b)
+    {
+        using var md5 = System.Security.Cryptography.MD5.Create();
+        using var fa = File.OpenRead(a);
+        using var fb = File.OpenRead(b);
+        return Convert.ToHexString(md5.ComputeHash(fa)) == Convert.ToHexString(md5.ComputeHash(fb));
     }
 
     private static void Rollback(string gameDir, string previousTrack, string directAssetsDir,

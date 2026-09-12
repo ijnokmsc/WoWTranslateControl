@@ -12,6 +12,7 @@ namespace wt {
 // 追加写 + 4MB 截断；线程安全（CriticalSection）。
 
 void LogInit();
+void wtSetLogEnabled(bool enabled);   // 配置文件 "log": false 时关闭文件日志
 void LogWrite(const char* level, const std::string& msg);
 void wtSetSelfModule(HMODULE h); // DllMain 传入引擎自身句柄（日志落 DLL 所在目录）
 

@@ -121,3 +121,69 @@ public class DllSwitcherTests
         Assert.Equal(DllSwitcher.TrackGs, DllSwitcher.Probe(game, assets).Current);
     }
 }
+
+public class EnsureUpToDateTests
+{
+    private static string TempDir()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "wtc-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    private static string MakeDirectDeployed()
+    {
+        var game = TempDir();
+        File.WriteAllText(Path.Combine(game, "Wow.exe"), "fake-wow");
+        File.WriteAllText(Path.Combine(game, "dinput8.dll"), "deployed-dinput");
+        File.WriteAllText(Path.Combine(game, "WoWTranslateDirect.dll"), "deployed-engine");
+        File.WriteAllText(Path.Combine(game, "dlls.txt"), "WoWTranslateDirect.dll\n");
+        return game;
+    }
+
+    private static string MakeDirectAssets()
+    {
+        var dir = TempDir();
+        File.WriteAllText(Path.Combine(dir, "dinput8.dll"), "deployed-dinput");
+        File.WriteAllText(Path.Combine(dir, "WoWTranslateDirect.dll"), "deployed-engine");
+        return dir;
+    }
+
+    [Fact]
+    public void 版本漂移_自动重新部署()
+    {
+        var game = MakeDirectDeployed();
+        File.WriteAllText(Path.Combine(game, "WoWTranslateDirect.dll"), "old-version");
+        var assets = MakeDirectAssets();
+
+        var lines = DllSwitcher.EnsureUpToDate(game, assets, wowRunning: () => false);
+
+        Assert.Contains(lines, l => l.Contains("已自动重新部署"));
+        Assert.Equal("deployed-engine", File.ReadAllText(Path.Combine(game, "WoWTranslateDirect.dll")));
+    }
+
+    [Fact]
+    public void 版本一致_无动作()
+    {
+        var game = MakeDirectDeployed();
+        var assets = MakeDirectAssets();
+
+        var lines = DllSwitcher.EnsureUpToDate(game, assets, wowRunning: () => false);
+
+        Assert.Empty(lines);
+        Assert.Equal("deployed-engine", File.ReadAllText(Path.Combine(game, "WoWTranslateDirect.dll")));
+    }
+
+    [Fact]
+    public void 游戏运行中_跳过校验()
+    {
+        var game = MakeDirectDeployed();
+        File.WriteAllText(Path.Combine(game, "WoWTranslateDirect.dll"), "old-version");
+        var assets = MakeDirectAssets();
+
+        var lines = DllSwitcher.EnsureUpToDate(game, assets, wowRunning: () => true);
+
+        Assert.Contains(lines, l => l.Contains("跳过"));
+        Assert.Equal("old-version", File.ReadAllText(Path.Combine(game, "WoWTranslateDirect.dll")));
+    }
+}

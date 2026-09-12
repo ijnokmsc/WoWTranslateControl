@@ -443,6 +443,8 @@ static void ApplyDisplayKeys(const json& disp)
         g_outgoingMode = disp["outgoingMode"].get<std::string>();
     if (g_outgoingMode != "off" && g_outgoingMode != "replace" && g_outgoingMode != "both")
         g_outgoingMode = "off";
+    if (disp.contains("log") && disp["log"].is_boolean())
+        wt::wtSetLogEnabled(disp["log"].get<bool>());
 }
 
 static void RebuildDriverChunk()

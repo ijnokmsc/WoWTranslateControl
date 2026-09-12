@@ -134,6 +134,12 @@ public partial class MainWindow : Window
         // 便携化：运行目录下生成 llama.cpp 目录（新用户把下载/解压的文件放这里即可）
         try { Directory.CreateDirectory(_cfg.LlamaDir); } catch { }
 
+        // DLL 版本自愈：游戏目录 DLL 与本地资产 MD5 不一致时自动重新部署
+        foreach (var l in Core.DllSwitcher.EnsureUpToDate(
+                     TxtGameDir.Text.Trim(),
+                     System.IO.Path.Combine(AppContext.BaseDirectory, "assets", "direct-dll")))
+            Log(l);
+
         if (_cfg.AutoStartLlama || _cfg.ProxyAutoStart)
             Dispatcher.BeginInvoke(new Action(() =>
             {
