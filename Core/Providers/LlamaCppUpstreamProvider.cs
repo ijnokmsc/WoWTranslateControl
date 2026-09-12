@@ -93,6 +93,17 @@ public sealed class LlamaCppUpstreamProvider : ITranslationProvider
                             {
                                 var role = m.TryGetProperty("role", out var rr) ? rr.GetString() : null;
                                 if (role == "system") continue; // 丢弃插件发来的空 system
+                                if (role == "user")
+                                {
+                                    // ⚠ 用管线剥离/术语处理后的 ctx.Text，绝不透传原始 body——
+                                    // 原始 user content 带 \1<频道>\1 标签，模型会把 CHANNEL
+                                    // 翻进译文（v22 实测：回包出现 "频道LFM 暗黑密码"）。
+                                    w.WriteStartObject();
+                                    w.WriteString("role", "user");
+                                    w.WriteString("content", ctx.Text);
+                                    w.WriteEndObject();
+                                    continue;
+                                }
                                 m.WriteTo(w);
                             }
                         }
