@@ -104,22 +104,34 @@ public partial class SetupWizardWindow : Window
     {
         if (CmbBuild.SelectedItem is not LlamaBuildInfo build) return;
         var dest = Path.Combine(LlamaDir, build.AssetName);
-        await RunDownload(build.Url, dest, () =>
+
+        // 手动下载支持：zip 已放入 llama 目录 → 跳过下载，直接解压
+        if (File.Exists(dest))
         {
-            Log($"已下载 {build.AssetName}，正在自动解压到 {LlamaDir} …");
-            try
-            {
-                // CUDA 版的 cudart 运行库包同走此处，一并自动解压
-                System.IO.Compression.ZipFile.ExtractToDirectory(dest, LlamaDir, overwriteFiles: true);
-                TxtStatus.Text = "llama.cpp 构建已下载并自动解压完成";
-                Log($"解压完成：{LlamaDir}\\llama-server.exe 应已就绪，返回主窗口即可启动 llama-server");
-            }
-            catch (Exception ex)
-            {
-                TxtStatus.Text = "自动解压失败，请手动解压";
-                Log($"自动解压失败：{ex.Message}。请手动将 {dest} 解压到 {LlamaDir}（需保留 llama-server.exe）");
-            }
-        }).ConfigureAwait(false);
+            Log($"检测到 {build.AssetName} 已存在，跳过下载，直接解压…");
+            ExtractBuildZip(dest);
+            return;
+        }
+        await RunDownload(build.Url, dest, () => ExtractBuildZip(dest)).ConfigureAwait(false);
+    }
+
+    /// <summary>解压 llama.cpp / cudart 构建包到 llama 目录（阻塞几秒，UI 线程可接受）。</summary>
+    private void ExtractBuildZip(string zipPath)
+    {
+        Log($"正在解压 {Path.GetFileName(zipPath)} 到 {LlamaDir} …");
+        try
+        {
+            // 后台线程解压（数秒），完成后回 UI 报告
+            Task.Run(() => System.IO.Compression.ZipFile.ExtractToDirectory(
+                zipPath, LlamaDir, overwriteFiles: true)).GetAwaiter().GetResult();
+            TxtStatus.Text = "llama.cpp 构建已解压完成";
+            Log($"解压完成：{LlamaDir}\\llama-server.exe 应已就绪，返回主窗口即可启动 llama-server");
+        }
+        catch (Exception ex)
+        {
+            TxtStatus.Text = "自动解压失败，请手动解压";
+            Log($"自动解压失败：{ex.Message}。请手动将 {zipPath} 解压到 {LlamaDir}（需保留 llama-server.exe）");
+        }
     }
 
     private async void BtnDownloadModel_Click(object sender, RoutedEventArgs e)
@@ -162,11 +174,13 @@ public partial class SetupWizardWindow : Window
         {
             Log($"开始下载：{url}");
             TxtStatus.Text = $"下载中：{Path.GetFileName(dest)}";
-            await Downloader.DownloadAsync(url, tmp, progress, _cts.Token).ConfigureAwait(false);
+            // 不带 ConfigureAwait(false)：下载完成后回到 UI 线程，
+            // 使 catch/finally 里的 UI 操作与 onDone 回调线程安全
+            //（v25 崩溃根因：threadpool 续体上调 SetBusy/Progress 抛跨线程异常）
+            await Downloader.DownloadAsync(url, tmp, progress, _cts.Token);
             if (File.Exists(dest)) File.Delete(dest);
             File.Move(tmp, dest);
-            // 回调统一回 UI 线程执行（DownloadAsync 内部 ConfigureAwait(false) 已脱离 UI 上下文）
-            await Dispatcher.InvokeAsync(onDone);
+            onDone();
         }
         catch (OperationCanceledException)
         {
