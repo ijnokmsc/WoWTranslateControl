@@ -166,3 +166,27 @@ public class GlossaryStoreTests
         Assert.DoesNotContain("i⟦", text.ToLower()); // inc 里的 n 不被吃
     }
 }
+public class BracketTagProtectionTests
+{
+    [Fact]
+    public void 全大写方括号短标签_原样穿透不被翻译()
+    {
+        var (text, map) = GlossaryApplier.Apply("[HC] doing stuff in game", NoEntries());
+        Assert.Contains("⟦P", text);
+        Assert.DoesNotContain("[HC]", text);
+        var (restored, all) = GlossaryApplier.Restore(text + " 已翻译", map);
+        Assert.Contains("[HC]", restored);
+        Assert.True(all);
+    }
+
+    [Fact]
+    public void 小写单词括号_不受保护_照常送翻()
+    {
+        var (text, _) = GlossaryApplier.Apply("[what] doing stuff", NoEntries());
+        Assert.DoesNotContain("⟦P", text);
+        Assert.Contains("[what]", text);
+    }
+
+    private static IReadOnlyList<GlossaryEntry> NoEntries() =>
+        Array.Empty<GlossaryEntry>();
+}

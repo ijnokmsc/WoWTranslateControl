@@ -23,9 +23,12 @@ public static class GlossaryApplier
 {
     // 完整包裹形态（|c + 链接 + |r）必须排在零散形态之前，整体摘成一个 ⟦P⟧，
     // 否则模型会看到 |cff0070DD⟦P0⟧|r 这种碎片段落并篡改它。
+    // 2026-09-12 追加：[HC]/[WB] 等全大写方括号短标签（服务器/模式标记）——模型会把
+    // [HC] 翻成 [英雄的]，必须像链接一样原样穿透。(?-i) 防止 IgnoreCase 波及小写正文。
     private static readonly Regex ReProtected = new(
         @"\|c[0-9a-fA-F]{8}(?:\|H[^|]*\|h[^|]*\|h|https?://ph\.wt/\d+)\|r" +
-        @"|https?://ph\.wt/\d+|\|H[^|]*\|h[^|]*\|h|\|T[^|]*\|t|\|c[0-9a-fA-F]{8}|\|r",
+        @"|https?://ph\.wt/\d+|\|H[^|]*\|h[^|]*\|h|\|T[^|]*\|t|\|c[0-9a-fA-F]{8}|\|r" +
+        @"|(?-i:\[[A-Z0-9]{2,10}\])",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     public const string PlaceholderPrefix = "⟦G";
