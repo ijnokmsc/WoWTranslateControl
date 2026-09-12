@@ -537,11 +537,47 @@ static bool VerifyAddresses()
 
 static HMODULE g_hSelfModule = NULL;
 
+// 自动配置（v14）：优先读 DLL 同目录 WoWTranslateDirect.json；否则默认指向控制台伪装
+// OpenAI 端点（架构定案：Track B 引擎 → 127.0.0.1:8080 → 控制台管线）。
+// v13 日志实锤：/run WoWTranslate_Translate 报 "translator not configured"——引擎
+// 从未拿到配置，配置入口只有 Lua Configure 与 SelfTest，游戏内无人调用。
+static void AutoConfigure()
+{
+    char path[MAX_PATH];
+    if (g_hSelfModule && GetModuleFileNameA(g_hSelfModule, path, MAX_PATH))
+    {
+        char* slash = strrchr(path, '\\');
+        if (slash) *slash = 0;
+        std::string cfgPath = std::string(path) + "\\WoWTranslateDirect.json";
+        HANDLE h = CreateFileA(cfgPath.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                               NULL, OPEN_EXISTING, 0, NULL);
+        if (h != INVALID_HANDLE_VALUE)
+        {
+            char buf[4096] = { 0 };
+            DWORD rd = 0;
+            ReadFile(h, buf, sizeof(buf) - 1, &rd, NULL);
+            CloseHandle(h);
+            if (rd > 0)
+            {
+                std::string r = wt::Translator::Inst().Configure(std::string(buf, rd));
+                WT_LOG_INFO("auto-config from file -> " + r);
+                if (r.rfind("ok", 0) == 0) return;      // 文件配置成功
+            }
+        }
+        WT_LOG_INFO("no usable WoWTranslateDirect.json beside DLL, applying default");
+    }
+    std::string r = wt::Translator::Inst().Configure(
+        "{\"provider\":\"openai\",\"apiKey\":\"wtc\",\"model\":\"wtc\","
+        "\"endpoint\":\"http://127.0.0.1:8080/v1/chat/completions\"}");
+    WT_LOG_INFO("auto-config default console endpoint -> " + r);
+}
+
 static DWORD WINAPI InitThread(LPVOID)
 {
     wt::wtSetSelfModule(g_hSelfModule);
     wt::LogInit();
     WT_LOG_INFO("WoWTranslateDirect 1.0 init (Track B direct engine)");
+    AutoConfigure();
 
     // ⚠ GS 原版时序复刻："Init thread started, sleeping 3s... → Attempting hook..."
     // GS 的 init 线程睡 3 秒等客户端核心初始化完成后再装 hook —— 我们 v2-v4 删掉
