@@ -148,6 +148,7 @@
                                       Margin="0,6,0,0" Checked="Tray_Changed"
                                       Unchecked="Tray_Changed" />
                             <CheckBox x:Name="ChkFileLog" Content="写入文件日志 proxy_traffic.log（排错用，默认关）"
+                                      Checked="ChkFileLog_Changed" Unchecked="ChkFileLog_Changed" />
                         </StackPanel>
                     </Border>
 

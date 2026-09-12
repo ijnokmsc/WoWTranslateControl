@@ -231,6 +231,7 @@ public partial class MainWindow : Window
 
         // 托盘与 DLL 轨道
         ChkTray.IsChecked = _cfg.MinimizeToTray;
+        ChkFileLog.IsChecked = _cfg.WriteFileLog;
         foreach (System.Windows.Controls.ComboBoxItem item in CmbDllTrack.Items)
             if ((string)item.Tag == _cfg.PluginTrack) { CmbDllTrack.SelectedItem = item; break; }
 
@@ -1061,6 +1062,14 @@ public partial class MainWindow : Window
         if (prefix == _cfg.DirectDisplayPrefix) return;
         _cfg.DirectDisplayPrefix = prefix;
         SyncDirectConfigToGameDir();
+    }
+
+    private void ChkFileLog_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        _cfg.WriteFileLog = ChkFileLog.IsChecked == true;
+        _cfg.Save();
+        Log($"文件日志 proxy_traffic.log 已{(ChkFileLog.IsChecked == true ? "开启" : "关闭")}");
     }
 
     private void CmbDirectOutgoing_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
