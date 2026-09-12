@@ -934,7 +934,7 @@ public partial class MainWindow : Window
         // 资产未就绪时给出明确提示，避免「灰但不知道为什么」
         if (target == Core.DllSwitcher.TrackDirect && !_lastDllStatus.DirectAssetsReady)
         {
-            TxtDllStatus.Text += $"\n⚠ Track B 不可选：未在 {_lastDllStatus.DirectAssetsDir} 或游戏目录 wtc_direct_dll 找到 dinput8.dll + WoWTranslateDirect.dll";
+            TxtDllStatus.Text += "\n⚠ Track B 不可选：未找到 Direct DLL 资产（控制台 assets\\direct-dll 或游戏目录 wtc_direct_dll）";
         }
     }
 

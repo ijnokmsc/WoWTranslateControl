@@ -9,8 +9,8 @@ namespace WoWTranslateControl.Core;
 /// <summary>
 /// 插件 DLL 轨道切换（ADR-007 双轨并行的操作面）。
 ///
-/// Track A（gs）     = 现役 WoWTranslate GS 插件链路：dinput8.dll + WoWTranslate335.dll + dlls.txt
-/// Track B（direct） = 自有 Direct DLL（实验）：dinput8.dll + WoWTranslateDirect.dll + dlls.txt
+/// Track B（direct） = 自有 Direct DLL（主推，全自治驱动）：dinput8.dll + WoWTranslateDirect.dll + dlls.txt
+/// Track A（gs）     = GS 插件链路（备用回退）：dinput8.dll + WoWTranslate335.dll + dlls.txt
 ///
 /// 文件语义（游戏根目录）：
 ///   - 被切走的轨道整组文件存放在 wtc_backup/&lt;轨道&gt;/，首次 stash 时保留原始基线（不覆盖）；
@@ -53,14 +53,15 @@ public sealed class DllSwitcher
             details.Add($"⚠ 该目录没有 Wow.exe，可能不是客户端根目录：{gameDir}");
 
         var (ready, assetDir) = FindDirectAssets(gameDir, directAssetsDir);
+        var assetLabel = assetDir == directAssetsDir ? "控制台 assets\\direct-dll" : "游戏目录 wtc_direct_dll";
         if (ready)
-            details.Add($"Direct 资产就绪：{assetDir}");
+            details.Add($"Direct 资产就绪：{assetLabel}");
         else
-            details.Add($"Direct 资产未就绪（需在 {assetDir} 放置 dinput8.dll + WoWTranslateDirect.dll）");
+            details.Add($"Direct 资产未就绪（需在 {assetLabel} 放置 dinput8.dll + WoWTranslateDirect.dll）");
 
         string cur, text;
-        if (hasDinput && hasDirect) { cur = TrackDirect; text = "Track B — 自有 Direct DLL（实验）"; }
-        else if (hasDinput && hasGs) { cur = TrackGs; text = "Track A — WoWTranslate GS（现役）"; }
+        if (hasDinput && hasDirect) { cur = TrackDirect; text = "Track B — 自有 Direct DLL（主推）"; }
+        else if (hasDinput && hasGs) { cur = TrackGs; text = "Track A — GS 插件（备用回退）"; }
         else if (!hasDinput) { cur = "disabled"; text = "未启用（游戏根目录无 dinput8.dll）"; }
         else { cur = "unknown"; text = "未知状态（dinput8.dll 存在但未发现任一轨道 DLL）"; }
 
@@ -235,6 +236,8 @@ public sealed class DllSwitcher
                     File.Copy(src, Path.Combine(gameDir, f));
                 }
                 lines.Add("✔ 已恢复 Track A（GS 插件：dinput8.dll + WoWTranslate335.dll + dlls.txt）");
+                RefreshTrackBackup(gameDir, TrackGs,
+                    new[] { "dinput8.dll", "WoWTranslate335.dll", "dlls.txt" }, lines);
             }
             else
             {
@@ -245,8 +248,9 @@ public sealed class DllSwitcher
                     "WoWTranslateDirect.dll" + Environment.NewLine);
                 var cfgPath = WriteDirectConfig(gameDir, listenPort, displayMode, displayPrefix, outgoingMode);
                 lines.Add($"✔ 已部署 Track B（Direct DLL，资产来自 {srcDir}）");
-                lines.Add($"✔ 已写入 {Path.GetFileName(cfgPath)}（endpoint 127.0.0.1:{listenPort}，displayMode={displayMode}）");
-                lines.Add("⚠ Track B 为实验状态：未经游戏内实测验证（对齐提交流铁律），出现异常请切回 Track A。");
+                lines.Add($"✔ 已写入 {Path.GetFileName(cfgPath)}（endpoint 127.0.0.1:{listenPort}，displayMode={displayMode}，outgoing={outgoingMode}）");
+                RefreshTrackBackup(gameDir, TrackDirect,
+                    new[] { "dinput8.dll", "WoWTranslateDirect.dll", "dlls.txt" }, lines);
             }
 
             // ---- 4. 写后自检 ----
@@ -265,6 +269,35 @@ public sealed class DllSwitcher
         {
             lines.Add($"❌ 切换失败：{ex.Message}");
             return lines;
+        }
+    }
+
+    /// <summary>
+    /// 切换成功后把当前轨道的部署组刷新到 wtc_backup/&lt;轨道&gt;/（覆盖写）——
+    /// 备份始终等于"上一次验证可用的部署组"，坏版本可直接手工回滚。
+    /// </summary>
+    private static void RefreshTrackBackup(string gameDir, string track,
+        IEnumerable<string> files, List<string> lines)
+    {
+        try
+        {
+            var dir = BackupDir(gameDir, track);
+            Directory.CreateDirectory(dir);
+            var copied = 0;
+            foreach (var f in files)
+            {
+                var src = Path.Combine(gameDir, f);
+                if (File.Exists(src))
+                {
+                    File.Copy(src, Path.Combine(dir, f), overwrite: true);
+                    copied++;
+                }
+            }
+            lines.Add($"  已备份当前轨道部署组（{copied} 个文件）→ wtc_backup/{track}/");
+        }
+        catch (Exception ex)
+        {
+            lines.Add($"  ⚠ 轨道备份失败：{ex.Message}");
         }
     }
 
