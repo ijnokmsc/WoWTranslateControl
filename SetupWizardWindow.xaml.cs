@@ -148,6 +148,8 @@ public partial class SetupWizardWindow : Window
         SetBusy(true);
         try { Directory.CreateDirectory(LlamaDir); } catch { }
         _cts = new CancellationTokenSource();
+        // 先写 .tmp，完成后原子改名——半截文件永远是 .tmp，取消/失败时整只清理
+        var tmp = dest + ".tmp";
         Progress<(long received, long total)> progress = new(t =>
         {
             var pct = t.total > 0 ? t.received * 100.0 / t.total : 0;
@@ -160,18 +162,22 @@ public partial class SetupWizardWindow : Window
         {
             Log($"开始下载：{url}");
             TxtStatus.Text = $"下载中：{Path.GetFileName(dest)}";
-            await Downloader.DownloadAsync(url, dest, progress, _cts.Token).ConfigureAwait(false);
+            await Downloader.DownloadAsync(url, tmp, progress, _cts.Token).ConfigureAwait(false);
+            if (File.Exists(dest)) File.Delete(dest);
+            File.Move(tmp, dest);
             // 回调统一回 UI 线程执行（DownloadAsync 内部 ConfigureAwait(false) 已脱离 UI 上下文）
             await Dispatcher.InvokeAsync(onDone);
         }
         catch (OperationCanceledException)
         {
-            Log("下载已取消");
-            TxtStatus.Text = "下载已取消";
+            TryDeletePartial(tmp);
+            Log("下载已停止，未完成的临时文件已清理（原文件不受影响）");
+            TxtStatus.Text = "下载已停止";
         }
         catch (Exception ex)
         {
-            Log($"下载失败：{ex.Message}");
+            TryDeletePartial(tmp);
+            Log($"下载失败：{ex.Message}（未完成的临时文件已清理）");
             Log($"可手动下载（地址见上方「开始下载」日志行），放到 {Path.GetDirectoryName(dest)} 后重试：" +
                 "llama.cpp 的 zip 放入后在向导重新下载同文件会触发自动解压，或自行解压到 llama 目录；" +
                 "模型 gguf 放入即视为就绪。");
@@ -184,11 +190,26 @@ public partial class SetupWizardWindow : Window
         }
     }
 
+    /// <summary>清理未完成的下载残留（.tmp 半截文件）。成品 dest 不动——保留上一次的好文件。</summary>
+    private void TryDeletePartial(string tmp)
+    {
+        try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+    }
+
+    private void BtnCancelDownload_Click(object sender, RoutedEventArgs e)
+    {
+        if (_cts == null) return;
+        _cts.Cancel();
+        Log("正在停止下载…");
+        BtnCancelDownload.IsEnabled = false;
+    }
+
     private void SetBusy(bool busy)
     {
         BtnDownloadBuild.IsEnabled = !busy;
         BtnDownloadModel.IsEnabled = !busy;
         BtnRefreshBuilds.IsEnabled = !busy;
+        BtnCancelDownload.IsEnabled = busy;
     }
 
     private void BtnApplyModel_Click(object sender, RoutedEventArgs e)

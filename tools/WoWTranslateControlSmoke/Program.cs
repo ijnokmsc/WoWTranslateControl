@@ -201,7 +201,7 @@ internal static class Program
     {
         var errors = new List<string>();
         Expect(w, errors, "CmbBuild", "CmbModel", "BtnDownloadBuild", "BtnDownloadModel",
-            "BtnApplyModel", "TxtHardware", "TxtAdvice", "Progress");
+            "BtnApplyModel", "TxtHardware", "TxtAdvice", "Progress", "BtnCancelDownload");
         var hw = FindByName<System.Windows.Controls.TextBlock>(w, "TxtHardware");
         // 硬件检测在后台线程跑（nvidia-smi/子进程），轮询等待完成
         for (var i = 0; i < 40 && (hw?.Text.Contains("GPU") != true); i++)

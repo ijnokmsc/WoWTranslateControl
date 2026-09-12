@@ -47,8 +47,7 @@
                             Padding="10,4" Click="BtnRefreshBuilds_Click" />
                     <Button x:Name="BtnDownloadBuild" Content="下载到 llama 目录"
                             Style="{StaticResource PrimaryBtn}" Margin="8,0,0,0"
-                            Padding="10,4" Click="BtnDownloadBuild_Click" />
-                </StackPanel>
+                            Padding="10,4" Click="BtnDownloadBuild_Click" />                </StackPanel>
                 <TextBlock x:Name="TxtBuildNote" Style="{StaticResource Dim}" Margin="0,6,0,0"
                            TextWrapping="Wrap"
                            Text="列表来自 GitHub 最新 Release。CUDA 版需同时下载 cudart 运行库并解压到同一目录。" />
@@ -88,8 +87,12 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
-                <ProgressBar Grid.Row="0" x:Name="Progress" Height="16"
-                             Minimum="0" Maximum="100" />
+                <StackPanel Grid.Row="0" Orientation="Horizontal">
+                    <ProgressBar x:Name="Progress" Height="16" Width="480"
+                                 Minimum="0" Maximum="100" />
+                    <Button x:Name="BtnCancelDownload" Content="停止下载" Margin="8,0,0,0"
+                            Padding="10,4" Click="BtnCancelDownload_Click" IsEnabled="False" />
+                </StackPanel>
                 <TextBox Grid.Row="1" x:Name="TxtLog" Margin="0,8,0,0" IsReadOnly="True"
                          TextWrapping="Wrap" FontFamily="Consolas" FontSize="11.5"
                          VerticalScrollBarVisibility="Auto"
