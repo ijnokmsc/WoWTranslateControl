@@ -42,6 +42,21 @@ public sealed class TranslationContext
 
     /// <summary>CacheStage 计算出的缓存 key，供翻译完成后回写。</summary>
     public string? CacheKey { get; set; }
+
+    /// <summary>
+    /// 目标语言覆盖。null = 按配置 InTargetLang（en→zh）；
+    /// 外发翻译（\1ZH2EN\1 标签）置 "en"，Provider 据此切换提示词/语言参数。
+    /// </summary>
+    public string? TargetLang { get; set; }
+
+    /// <summary>源语言覆盖（外发翻译 = "zh"）。null = 按各 Provider 默认。</summary>
+    public string? SourceLang { get; set; }
+
+    /// <summary>
+    /// 外发翻译请求（玩家自己发的中文）。内容规则 R6/R8 会把中文正文误判为
+    /// "无需翻译"直接拦截，故外发请求跳过内容过滤。
+    /// </summary>
+    public bool Outgoing { get; set; }
 }
 
 /// <summary>Stage 短路结果：直接以此内容回包给插件，不再进入后续阶段。</summary>

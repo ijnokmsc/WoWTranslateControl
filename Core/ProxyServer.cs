@@ -311,6 +311,14 @@ public sealed class ProxyServer : IDisposable
         // 频道标签剥离（无条件）：\1CH\1 前缀由插件 Lua 补丁注入，绝不进模型/缓存
         var channel = MessageFilter.ParseChannelTag(userContent, out var cleanText);
         var ctx = new TranslationContext(cleanText, body, _cfg) { Channel = channel };
+        if (channel == "ZH2EN")
+        {
+            // 外发翻译：玩家自己发的中文 → 英文（v24）。跳过 R 规则（中文会被 R6/R8 误杀）、
+            // 切换翻译方向、缓存 key 按 en 目标语分离。
+            ctx.Outgoing = true;
+            ctx.SourceLang = "zh";
+            ctx.TargetLang = "en";
+        }
 
         // 落盘留证：DLL 实际发来的请求文本 + 原始报文前 120 字节 hex（诊断编码损坏用）
         if (_cfg.WriteFileLog) WriteTrafficLog(channel, cleanText, body);

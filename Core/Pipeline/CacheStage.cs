@@ -96,7 +96,7 @@ public sealed class CacheStage : IMessageStage, IDisposable
         var raw = string.Join('\x1f',
             "kv2",
             ctx.Text,
-            ctx.Config.InTargetLang,
+            ctx.TargetLang ?? ctx.Config.InTargetLang,
             _glossary.Version.ToString(),
             _providerId,
             _promptHash);

@@ -78,8 +78,10 @@ public sealed class LlamaCppUpstreamProvider : ITranslationProvider
                         w.WritePropertyName("messages");
                         w.WriteStartArray();
 
-                        // 强制第一条为 system 指令
-                        var systemPrompt = _cfg.SystemPrompt;
+                        // 强制第一条为 system 指令（外发翻译 zh→en 时切换方向提示词）
+                        var systemPrompt = ctx.TargetLang == "en"
+                            ? AppConfig.DefaultSystemPromptZh2En
+                            : _cfg.SystemPrompt;
                         if (ctx.GlossaryApplied)
                             systemPrompt += Core.Glossary.GlossaryApplier.PromptAddendum;
                         w.WriteStartObject();

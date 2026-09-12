@@ -217,6 +217,8 @@ public partial class MainWindow : Window
         foreach (System.Windows.Controls.ComboBoxItem item in CmbDirectDisplay.Items)
             if ((string)item.Tag == _cfg.DirectDisplayMode) { CmbDirectDisplay.SelectedItem = item; break; }
         TxtDirectPrefix.Text = _cfg.DirectDisplayPrefix;
+        foreach (System.Windows.Controls.ComboBoxItem item in CmbDirectOutgoing.Items)
+            if ((string)item.Tag == _cfg.DirectOutgoingMode) { CmbDirectOutgoing.SelectedItem = item; break; }
 
         _suppressSlider = true;
         SliderRatio.Value = _cfg.ChineseRatioLimit;
@@ -948,7 +950,8 @@ public partial class MainWindow : Window
         var lines = Core.DllSwitcher.SwitchTo(gameDir, target, assets,
             listenPort: _cfg.ListenPort,
             displayMode: _cfg.DirectDisplayMode,
-            displayPrefix: _cfg.DirectDisplayPrefix);
+            displayPrefix: _cfg.DirectDisplayPrefix,
+            outgoingMode: _cfg.DirectOutgoingMode);
         TxtPluginReport.Text = string.Join("\n", lines);
         foreach (var line in lines) Log(line);
         MessageBox.Show(this, string.Join("\n", lines), "DLL 轨道切换",
@@ -971,8 +974,8 @@ public partial class MainWindow : Window
                 Directory.Exists(gameDir) && File.Exists(Path.Combine(gameDir, "Wow.exe")))
             {
                 Core.DllSwitcher.WriteDirectConfig(gameDir, _cfg.ListenPort,
-                    _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix);
-                Log($"已更新游戏目录 WoWTranslateDirect.json（displayMode={_cfg.DirectDisplayMode}，重登生效）");
+                    _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix, _cfg.DirectOutgoingMode);
+                Log($"已更新游戏目录 WoWTranslateDirect.json（displayMode={_cfg.DirectDisplayMode}，outgoing={_cfg.DirectOutgoingMode}，重登生效）");
             }
         }
         catch (Exception ex)
@@ -997,6 +1000,15 @@ public partial class MainWindow : Window
         TxtDirectPrefix.Text = prefix;
         if (prefix == _cfg.DirectDisplayPrefix) return;
         _cfg.DirectDisplayPrefix = prefix;
+        SyncDirectConfigToGameDir();
+    }
+
+    private void CmbDirectOutgoing_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded || CmbDirectOutgoing.SelectedItem is not System.Windows.Controls.ComboBoxItem item) return;
+        var mode = (string)item.Tag;
+        if (mode == _cfg.DirectOutgoingMode) return;
+        _cfg.DirectOutgoingMode = mode;
         SyncDirectConfigToGameDir();
     }
 }

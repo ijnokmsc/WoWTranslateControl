@@ -57,7 +57,9 @@ public sealed class OpenAiCompatProvider : ITranslationProvider
 
     internal byte[] BuildRequest(TranslationContext ctx)
     {
-        var systemPrompt = _cfg.SystemPrompt;
+        var systemPrompt = ctx.TargetLang == "en"
+            ? AppConfig.DefaultSystemPromptZh2En
+            : _cfg.SystemPrompt;
         if (ctx.GlossaryApplied)
             systemPrompt += Glossary.GlossaryApplier.PromptAddendum;
 

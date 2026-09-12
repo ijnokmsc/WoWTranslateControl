@@ -97,9 +97,11 @@ public sealed class DllSwitcher
     /// UTF-8 无 BOM（DLL 侧 nlohmann::json 不认 BOM）。
     /// </summary>
     public static string WriteDirectConfig(string gameDir, int listenPort,
-        string displayMode, string displayPrefix)
+        string displayMode, string displayPrefix, string outgoingMode = "off")
     {
         if (displayMode != "replace" && displayMode != "both") displayMode = "replace";
+        if (outgoingMode != "off" && outgoingMode != "replace" && outgoingMode != "both")
+            outgoingMode = "off";
         var json =
             "{\n" +
             "  \"provider\": \"openai\",\n" +
@@ -107,7 +109,8 @@ public sealed class DllSwitcher
             "  \"model\": \"WoWTranslateControl\",\n" +
             $"  \"endpoint\": \"http://127.0.0.1:{listenPort}/v1/chat/completions\",\n" +
             $"  \"displayMode\": \"{displayMode}\",\n" +
-            $"  \"displayPrefix\": \"{EscapeJson(displayPrefix ?? "[译]")}\"\n" +
+            $"  \"displayPrefix\": \"{EscapeJson(displayPrefix ?? "[译]")}\",\n" +
+            $"  \"outgoingMode\": \"{outgoingMode}\"\n" +
             "}\n";
         var path = Path.Combine(gameDir, "WoWTranslateDirect.json");
         File.WriteAllText(path, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
@@ -145,7 +148,8 @@ public sealed class DllSwitcher
         Func<bool>? wowRunning = null,
         int listenPort = 8080,
         string displayMode = "replace",
-        string displayPrefix = "[译]")
+        string displayPrefix = "[译]",
+        string outgoingMode = "off")
     {
         var lines = new List<string>();
         try
@@ -239,7 +243,7 @@ public sealed class DllSwitcher
                     File.Copy(Path.Combine(srcDir, f), Path.Combine(gameDir, f));
                 File.WriteAllText(Path.Combine(gameDir, "dlls.txt"),
                     "WoWTranslateDirect.dll" + Environment.NewLine);
-                var cfgPath = WriteDirectConfig(gameDir, listenPort, displayMode, displayPrefix);
+                var cfgPath = WriteDirectConfig(gameDir, listenPort, displayMode, displayPrefix, outgoingMode);
                 lines.Add($"✔ 已部署 Track B（Direct DLL，资产来自 {srcDir}）");
                 lines.Add($"✔ 已写入 {Path.GetFileName(cfgPath)}（endpoint 127.0.0.1:{listenPort}，displayMode={displayMode}）");
                 lines.Add("⚠ Track B 为实验状态：未经游戏内实测验证（对齐提交流铁律），出现异常请切回 Track A。");

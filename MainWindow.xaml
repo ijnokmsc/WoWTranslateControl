@@ -418,6 +418,15 @@
                                 <TextBox x:Name="TxtDirectPrefix" Width="90" Text="[译]"
                                          LostFocus="TxtDirectPrefix_LostFocus" />
                             </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <TextBlock Text="外发翻译（中文→英文）：" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <ComboBox x:Name="CmbDirectOutgoing" Width="200"
+                                          SelectionChanged="CmbDirectOutgoing_SelectionChanged">
+                                    <ComboBoxItem Content="关闭" Tag="off" />
+                                    <ComboBoxItem Content="只发英文（失败发原文）" Tag="replace" />
+                                    <ComboBoxItem Content="原文+英文都发" Tag="both" />
+                                </ComboBox>
+                            </StackPanel>
                             <TextBlock x:Name="TxtDirectDisplayHint" Style="{StaticResource Dim}"
                                        Margin="0,4,0,0" TextWrapping="Wrap"
                                        Text="显示模式随 WoWTranslateDirect.json 写入游戏目录，切换轨道或修改后自动更新，重新登录游戏后生效。" />

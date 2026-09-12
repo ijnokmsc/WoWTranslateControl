@@ -38,6 +38,13 @@ public sealed class AppConfig
 
     public string SystemPrompt { get; set; } = DefaultSystemPrompt;
 
+    /// <summary>外发翻译（中文→英文）的系统提示词，与 DefaultSystemPrompt 成对。</summary>
+    public const string DefaultSystemPromptZh2En =
+        "You are a World of Warcraft translator. Translate the given game chat " +
+        "from Chinese into English. Output ONLY the English translation, no explanation, " +
+        "no surrounding quotes. Preserve WoW hyperlink tags (|H...|h...|h, |c...|r) and " +
+        "placeholders like http://ph.wt/1 and ⟦G11⟧ exactly as-is.";
+
     /// <summary>
     /// 单次请求的 token 上限。DLL 不发 max_tokens，不设上限时模型可能一直生成到耗尽上下文。
     /// 翻译结果通常很短，实测 128 足够，这里放宽到 256 留余量。
@@ -191,6 +198,12 @@ public sealed class AppConfig
 
     /// <summary>Track B both 模式的译文行前缀。</summary>
     public string DirectDisplayPrefix { get; set; } = "[译]";
+
+    /// <summary>
+    /// Track B 外发翻译模式："off" = 关闭；"replace" = 你发的中文只发英文译文（失败发原文）；
+    /// "both" = 原文和英文都发。随 WoWTranslateDirect.json 写入游戏目录，重登生效。
+    /// </summary>
+    public string DirectOutgoingMode { get; set; } = "replace";
 
     // ---------- 过滤规则说明（只读，供界面展示） ----------
     [JsonIgnore]

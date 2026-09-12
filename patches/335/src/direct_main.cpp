@@ -183,13 +183,24 @@ WT_NOINLINE static int L_Translate_impl(lua_State* L)
 
     const char* from = p_isstring(L, 2) ? p_tolstring(L, 2, NULL) : "zh";
     const char* to   = p_isstring(L, 3) ? p_tolstring(L, 3, NULL) : "en";
-    double idNum = (p_isnumber(L, 4) || p_isstring(L, 4)) ? p_tonumber(L, 4) : 0.0;
-
-    char idBuf[32];
-    _snprintf(idBuf, sizeof(idBuf), "%.0f", idNum);
+    // requestId：驱动用 "out_N"（外发）/"N"（收发）字符串 id——非数字必须原样保留，
+    // 旧逻辑 tonumber 会把 "out_1" 吞成 0，Poll 路由和并发都错乱
+    std::string idStr;
+    if (p_isstring(L, 4))
+    {
+        const char* s = p_tolstring(L, 4, NULL);
+        if (s && *s) idStr = s;
+    }
+    if (idStr.empty())
+    {
+        double idNum = (p_isnumber(L, 4) || p_isstring(L, 4)) ? p_tonumber(L, 4) : 0.0;
+        char idBuf[32];
+        _snprintf(idBuf, sizeof(idBuf), "%.0f", idNum);
+        idStr = idBuf;
+    }
 
     std::string err;
-    if (!wt::Translator::Inst().Queue(idBuf, text, from, to, err))
+    if (!wt::Translator::Inst().Queue(idStr, text, from, to, err))
     {
         WT_LOG_ERROR("Translate queue failed: " + err);
         return PushResult(L, "error|" + err);
@@ -412,9 +423,10 @@ static volatile LONG g_registerDone = 0;
 
 // ==================== v16：驱动 Lua 注入（全自治模式）====================
 
-// 显示配置（AutoConfigure 从 WoWTranslateDirect.json 解析；缺省 replace/[译]）
+// 显示/外发配置（AutoConfigure 从 WoWTranslateDirect.json 解析；缺省 replace/[译]/off）
 static std::string g_displayMode   = "replace";   // "replace" | "both"
 static std::string g_displayPrefix = "[译]";      // UTF-8（客户端为 UTF-8 通道）
+static std::string g_outgoingMode  = "off";       // "off" | "replace" | "both"
 
 static std::string g_driverChunk;                 // 配置前缀 + 驱动 Lua，InitThread 组装
 static volatile LONG g_driverDone = 0;            // 注入成功（或放弃）后置 1
@@ -712,7 +724,12 @@ static void AutoConfigure()
                         g_displayPrefix = disp["displayPrefix"].get<std::string>();
                     if (g_displayMode != "replace" && g_displayMode != "both")
                         g_displayMode = "replace";
-                    WT_LOG_INFO("display config: mode=" + g_displayMode);
+                    if (disp.contains("outgoingMode") && disp["outgoingMode"].is_string())
+                        g_outgoingMode = disp["outgoingMode"].get<std::string>();
+                    if (g_outgoingMode != "off" && g_outgoingMode != "replace" && g_outgoingMode != "both")
+                        g_outgoingMode = "off";
+                    WT_LOG_INFO("display config: mode=" + g_displayMode +
+                                " outgoing=" + g_outgoingMode);
                 }
                 catch (...) {}
 
@@ -766,7 +783,8 @@ static DWORD WINAPI InitThread(LPVOID)
 
     // v16 驱动块：配置前缀（WTC 全局表）+ 驱动 Lua，注册成功后主线程注入
     g_driverChunk = std::string("WTC={displayMode='") + wt::LuaEscape(g_displayMode) +
-                    "',prefix='" + wt::LuaEscape(g_displayPrefix) + "'}\n" +
+                    "',prefix='" + wt::LuaEscape(g_displayPrefix) +
+                    "',outgoing='" + wt::LuaEscape(g_outgoingMode) + "'}\n" +
                     wt::DriverLuaCode();
 
     // 保存 gettop 原 6 字节（gettop 签名前 6 字节，指令边界：push ebp / mov ebp,esp / mov ecx,[ebp+8]）

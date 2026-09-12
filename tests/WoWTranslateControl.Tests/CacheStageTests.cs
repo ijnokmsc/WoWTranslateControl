@@ -94,3 +94,50 @@ public class CacheStageTests
         Assert.Null(result);
     }
 }
+
+public class OutgoingRoutingTests
+{
+    private static AppConfig Cfg() => new() { CacheEnabled = true, CachePersist = false };
+
+    [Fact]
+    public async Task 外发请求_中文正文不触发内容过滤()
+    {
+        // R8"已含中文"对普通请求必拦；外发请求必须放行（否则中文→英文全被吞）
+        var cfg = Cfg();
+        var filter = new FilterStage(cfg);
+
+        var normal = new TranslationContext("这是一个超过八个字的中文消息测试", Array.Empty<byte>(), cfg);
+        var normalResult = await filter.ProcessAsync(normal, default);
+        Assert.NotNull(normalResult); // R8 拦截
+
+        var outgoing = new TranslationContext("这是一个超过八个字的中文消息测试", Array.Empty<byte>(), cfg)
+        {
+            Outgoing = true,
+            SourceLang = "zh",
+            TargetLang = "en",
+            Channel = "ZH2EN",
+        };
+        var outgoingResult = await filter.ProcessAsync(outgoing, default);
+        Assert.Null(outgoingResult); // 放行进 Provider
+    }
+
+    [Fact]
+    public async Task 外发请求_缓存key与普通方向分离()
+    {
+        var glossary = new GlossaryStore(Path.Combine(
+            Path.GetTempPath(), "wtc-tests", Guid.NewGuid().ToString("N"), "glossary.json"));
+        var cache = new CacheStage(Cfg(), glossary, Path.Combine(
+            Path.GetTempPath(), "wtc-tests", Guid.NewGuid().ToString("N"), "cache.json"), "llama-local");
+
+        var inc = new TranslationContext("测试", Array.Empty<byte>(), Cfg());
+        await cache.ProcessAsync(inc, default);
+        var outCtx = new TranslationContext("测试", Array.Empty<byte>(), Cfg())
+        {
+            Outgoing = true,
+            TargetLang = "en",
+        };
+        await cache.ProcessAsync(outCtx, default);
+
+        Assert.NotEqual(inc.CacheKey, outCtx.CacheKey);
+    }
+}

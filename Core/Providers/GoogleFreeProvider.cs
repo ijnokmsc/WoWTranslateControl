@@ -29,8 +29,8 @@ public sealed class GoogleFreeProvider : ITranslationProvider
         {
             var url = "https://translate.googleapis.com/translate_a/single" +
                       "?client=gtx&dt=t" +
-                      $"&sl={Uri.EscapeDataString(_cfg.GoogleSl)}" +
-                      $"&tl={Uri.EscapeDataString(_cfg.GoogleTl)}" +
+                      $"&sl={Uri.EscapeDataString(ctx.SourceLang ?? _cfg.GoogleSl)}" +
+                      $"&tl={Uri.EscapeDataString(ctx.TargetLang ?? _cfg.GoogleTl)}" +
                       $"&q={Uri.EscapeDataString(ctx.Text)}";
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
             req.Headers.UserAgent.ParseAdd("WoWTranslateControl/2.0");

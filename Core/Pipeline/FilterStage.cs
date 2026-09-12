@@ -16,6 +16,9 @@ public sealed class FilterStage : IMessageStage
 
     public Task<PipelineResult?> ProcessAsync(TranslationContext ctx, CancellationToken ct)
     {
+        // 外发翻译：正文是玩家刚敲的中文，R6/R8"已是中文"规则必然误杀 → 跳过内容规则
+        if (ctx.Outgoing) return Task.FromResult<PipelineResult?>(null);
+
         var channelDecision = MessageFilter.CheckChannel(ctx.Channel, _cfg);
         if (channelDecision != null)
         {

@@ -74,6 +74,8 @@ end
 local WTC_CFG = WTC or {}
 local displayMode = tostring(WTC_CFG.displayMode or "replace")
 local dispPrefix = tostring(WTC_CFG.prefix or "[译]")
+-- 外发翻译：off=关闭 | replace=只发英文 | both=原文+英文都发
+local outgoingMode = tostring(WTC_CFG.outgoing or "off")
 
 local CHANNELS = {
   CHAT_MSG_SAY = "SAY", CHAT_MSG_YELL = "YELL", CHAT_MSG_WHISPER = "WHISPER",
@@ -94,10 +96,13 @@ local SYSTEM_EVENTS = {
 
 local curChannel, curSystem = nil, false
 local pending, counter = {}, 0
+local outPending, outCounter = {}, 0
+local origSend = nil
 
 -- v19 诊断旗标（各只回报一次，进 DLL 日志定位链路断点）
 local dbgHooked, dbgCapture, dbgCjk = false, false, false
 local dbgQueueErr, dbgTransOk, dbgTransErr, dbgTimeout, dbgDisplayed = false, false, false, false, false
+local dbgOutOk, dbgOutErr, dbgOutSkip = false, false, false
 
 local function HasLatin(t)
   return string.find(t, "%a") ~= nil
@@ -319,6 +324,13 @@ local function HandleIncoming(frame, orig, text, r, g, b, id, hold)
   if not curChannel or curSystem then
     return Passthrough(frame, orig, text, r, g, b, id, hold)
   end
+  -- 自己发出的消息回显不翻（外发英文译文回显时防 EN→ZH 重翻绕一圈）
+  if UnitName and UnitName("player") then
+    local me = UnitName("player")
+    if me and me ~= "" and string.find(text, "|Hplayer:" .. me .. ":", 1, true) then
+      return Passthrough(frame, orig, text, r, g, b, id, hold)
+    end
+  end
   -- 先剥 [频道] [玩家]: 头，正文才做语言判断与翻译（头里的中文频道名不该触发跳过）
   local body = StripChatPrefixBody(text)
   if body == "" then
@@ -397,6 +409,39 @@ ChatFrame_OnEvent = function(self, event, ...)
   return res
 end
 
+-- ---- hook SendChatMessage：外发中文 → 英文（\1ZH2EN\1 标签走控制台方向路由）----
+local OUT_TYPES = {
+  SAY = true, YELL = true, WHISPER = true, PARTY = true, GUILD = true,
+  OFFICER = true, RAID = true, RAID_WARNING = true, BATTLEGROUND = true,
+  CHANNEL = true,
+}
+origSend = SendChatMessage
+SendChatMessage = function(msg, chatType, language, channel)
+  if outgoingMode == "off" or not msg or msg == "" or not HasCJK(msg)
+    or not chatType or not OUT_TYPES[chatType] then
+    return origSend(msg, chatType, language, channel)
+  end
+  outCounter = outCounter + 1
+  local oid = "out_" .. outCounter
+  outPending[oid] = { msg = msg, chatType = chatType,
+                      language = language, channel = channel, t = GetTime() }
+  local ok = pcall(function()
+    WoWTranslate_Translate("\1ZH2EN\1" .. msg, "zh", "en", oid)
+  end)
+  if not ok then
+    outPending[oid] = nil
+    return origSend(msg, chatType, language, channel)
+  end
+  if not dbgOutSkip then
+    dbgOutSkip = true
+    WoWTranslate_Diag("WTC_OUTCAPTURE mode=" .. outgoingMode)
+  end
+  if outgoingMode == "both" then
+    origSend(msg, chatType, language, channel)   -- 原文立即发出，英文随后
+  end
+  -- replace 模式：压住不发，等译文（10s 超时发原文，见轮询循环）
+end
+
 -- ---- 轮询帧：Poll 译文 + 30s 超时兜底 ----
 local pollAcc = 0
 local pollFrame = CreateFrame("Frame")
@@ -410,8 +455,22 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
     local id = JsonGetString(j, "id")
     local tr = JsonGetString(j, "translation") or ""
     local er = JsonGetString(j, "error") or ""
-    local p = id and pending[id] or nil
-    if p and not p.done then
+    -- 外发翻译结果（out_N id）：replace 模式在此刻补发英文
+    if id and string.sub(id, 1, 4) == "out_" then
+      local o = outPending[id]
+      if o then
+        outPending[id] = nil
+        local sendText = o.msg
+        if er == "" and tr ~= "" then sendText = tr end
+        pcall(function() origSend(sendText, o.chatType, o.language, o.channel) end)
+        if not dbgOutOk then
+          dbgOutOk = true
+          WoWTranslate_Diag("WTC_OUTOK id=" .. id .. " send=" .. string.sub(sendText, 1, 60))
+        end
+      end
+    else
+      local p = id and pending[id] or nil
+      if p and not p.done then
       p.done = true
       pending[id] = nil
       if er ~= "" then
@@ -438,6 +497,7 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
           p.orig(p.frame, p.prefix .. finalText, p.r, p.g, p.b, p.id, p.hold)
         end
       end
+      end
     end
   end
   local now = GetTime()
@@ -453,10 +513,24 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
       end
     end
   end
+  -- 外发翻译 10s 超时：replace 模式发原文兜底（both 已发过原文，直接丢弃）
+  for oid, o in pairs(outPending) do
+    if now - o.t > 10 then
+      outPending[oid] = nil
+      if outgoingMode == "replace" then
+        pcall(function() origSend(o.msg, o.chatType, o.language, o.channel) end)
+      end
+      if not dbgOutErr then
+        dbgOutErr = true
+        WoWTranslate_Diag("WTC_OUTTIMEOUT id=" .. oid)
+      end
+    end
+  end
 end)
 
-DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r Direct driver v20 loaded (mode=" ..
-  displayMode .. (displayMode == "both" and (", prefix=" .. dispPrefix) or "") .. ")")
+DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r Direct driver v24 loaded (mode=" ..
+  displayMode .. (displayMode == "both" and (", prefix=" .. dispPrefix) or "") ..
+  ", outgoing=" .. outgoingMode .. ")")
 
 end  -- WTC_MAIN
 
