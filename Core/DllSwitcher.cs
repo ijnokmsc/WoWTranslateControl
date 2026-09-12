@@ -47,6 +47,10 @@ public sealed class DllSwitcher
         var hasGs = File.Exists(Path.Combine(gameDir, "WoWTranslate335.dll"));
         var hasDirect = File.Exists(Path.Combine(gameDir, "WoWTranslateDirect.dll"));
 
+        // 目录有效性提示（不改变轨道判定，但让配错目录一眼可见）
+        if (!File.Exists(Path.Combine(gameDir, "Wow.exe")))
+            details.Add($"⚠ 该目录没有 Wow.exe，可能不是客户端根目录：{gameDir}");
+
         var (ready, assetDir) = FindDirectAssets(gameDir, directAssetsDir);
         if (ready)
             details.Add($"Direct 资产就绪：{assetDir}");
@@ -111,6 +115,13 @@ public sealed class DllSwitcher
             if (!Directory.Exists(gameDir))
             {
                 lines.Add($"❌ 游戏目录不存在：{gameDir}");
+                return lines;
+            }
+
+            if (!File.Exists(Path.Combine(gameDir, "Wow.exe")))
+            {
+                lines.Add($"❌ 目录中未找到 Wow.exe，拒绝切换：{gameDir}");
+                lines.Add("   请在「游戏目录」框填入 3.3.5 客户端根目录（可点右侧「浏览…」手动选择）。");
                 return lines;
             }
 

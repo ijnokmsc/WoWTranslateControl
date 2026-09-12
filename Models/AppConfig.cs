@@ -148,7 +148,7 @@ public sealed class AppConfig
 
     // ---------- 插件一键配置 ----------
     /// <summary>游戏客户端根目录（含 Wow.exe / Interface / WTF）。</summary>
-    public string GameDir { get; set; } = @"D:\Games\GrimfallWoW\Wotlk";
+    public string GameDir { get; set; } = @"D:\Games\TriumvirateWoW";
 
     /// <summary>频道说明目录（供界面展示与一键配置同步插件 incomingChannels）。</summary>
     [JsonIgnore]
