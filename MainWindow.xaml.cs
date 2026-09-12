@@ -78,6 +78,15 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        // 窗口/任务栏图标：从 exe 旁的 assets\app.ico 加载（XAML 相对 URI 在编译后的
+        // BAML 里不指向 exe 目录，会抛异常，故用代码加载）
+        try
+        {
+            Icon = System.Windows.Media.Imaging.BitmapFrame.Create(
+                new Uri(Path.Combine(AppContext.BaseDirectory, "assets", "app.ico")));
+        }
+        catch { /* 图标缺失不影响功能 */ }
+
         _cfg = AppConfig.Load();
         TrafficGrid.ItemsSource = _view;
         RuleStatsList.ItemsSource = _ruleStats;
@@ -122,10 +131,22 @@ public partial class MainWindow : Window
         Log($"已加载配置：llama 目录 {_cfg.LlamaDir}，模型 {_cfg.ModelFile}，" +
             $"监听 {_cfg.ListenPort} → 上游 {_cfg.UpstreamPort}");
 
+        // 便携化：运行目录下生成 llama.cpp 目录（新用户把下载/解压的文件放这里即可）
+        try { Directory.CreateDirectory(_cfg.LlamaDir); } catch { }
+
         if (_cfg.AutoStartLlama || _cfg.ProxyAutoStart)
             Dispatcher.BeginInvoke(new Action(() =>
             {
-                if (_cfg.AutoStartLlama) StartLlama();
+                // 首次使用（还没装 llama.cpp）不自动启动 llama-server——
+                // 空跑只会报"未找到可执行文件"，应引导走向导
+                if (_cfg.AutoStartLlama)
+                {
+                    if (File.Exists(Path.Combine(_cfg.LlamaDir, "llama-server.exe")))
+                        StartLlama();
+                    else
+                        Log("未检测到 llama.cpp（缺 llama-server.exe），已跳过 llama-server 自动启动。" +
+                            "请打开「环境检测与下载向导」完成下载，或把文件放入 llama 目录后手动启动。");
+                }
                 if (_cfg.ProxyAutoStart) StartProxy();
             }), DispatcherPriority.Background);
     }

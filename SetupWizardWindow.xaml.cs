@@ -61,10 +61,22 @@ public partial class SetupWizardWindow : Window
         await Dispatcher.InvokeAsync(() =>
         {
             BtnRefreshBuilds.IsEnabled = true;
+            // 手动部署支持：已放好 llama-server.exe 的用户无需再下载构建
+            if (File.Exists(Path.Combine(LlamaDir, "llama-server.exe")))
+            {
+                TxtBuildNote.Text = $"✔ 检测到 {LlamaDir}\\llama-server.exe 已存在——llama.cpp 已就绪，无需重复下载；如需更换版本再选下方构建下载覆盖。";
+                if (builds.Count > 0)
+                {
+                    _builds = ModelAdvisor.OrderBuilds(builds, _recommendation!);
+                    CmbBuild.ItemsSource = _builds;
+                    CmbBuild.SelectedIndex = 0;
+                }
+                return;
+            }
             if (builds.Count == 0)
             {
                 TxtBuildNote.Text = string.IsNullOrEmpty(error)
-                    ? "GitHub 最近 30 个 release 中未找到 Windows 构建（发布方式可能又变了），请到 llama.cpp Releases 页手动下载。"
+                    ? "GitHub 最近 30 个 release 中未找到 Windows 构建（发布方式可能又变了），请到 llama.cpp Releases 页手动下载 zip，解压到 llama 目录（保留 llama-server.exe）。"
                     : error;
                 return;
             }
@@ -73,7 +85,7 @@ public partial class SetupWizardWindow : Window
             // 默认选中推荐的第一个
             CmbBuild.SelectedIndex = 0;
             TxtBuildNote.Text = $"共 {_builds.Count} 个可用构建。推荐 {(_recommendation!.LlamaAssetContains.Contains("cuda") ? "CUDA" : "CPU")} 版" +
-                                "；CUDA 版还需下载 cudart 运行库一并解压。";
+                                "；CUDA 版还需下载 cudart 运行库一并解压。下载慢也可手动下载 zip 放入 llama 目录，重新点「刷新」即可识别。";
         });
     }
 
@@ -92,10 +104,21 @@ public partial class SetupWizardWindow : Window
     {
         if (CmbBuild.SelectedItem is not LlamaBuildInfo build) return;
         var dest = Path.Combine(LlamaDir, build.AssetName);
-        await RunDownload(build.Url, dest, async () =>
+        await RunDownload(build.Url, dest, () =>
         {
-            Log($"已下载 {build.AssetName}。请在 {LlamaDir} 解压覆盖（CUDA 版同解 cudart 包）。");
-            TxtStatus.Text = "llama.cpp 构建下载完成，请手动解压到 llama 目录";
+            Log($"已下载 {build.AssetName}，正在自动解压到 {LlamaDir} …");
+            try
+            {
+                // CUDA 版的 cudart 运行库包同走此处，一并自动解压
+                System.IO.Compression.ZipFile.ExtractToDirectory(dest, LlamaDir, overwriteFiles: true);
+                TxtStatus.Text = "llama.cpp 构建已下载并自动解压完成";
+                Log($"解压完成：{LlamaDir}\\llama-server.exe 应已就绪，返回主窗口即可启动 llama-server");
+            }
+            catch (Exception ex)
+            {
+                TxtStatus.Text = "自动解压失败，请手动解压";
+                Log($"自动解压失败：{ex.Message}。请手动将 {dest} 解压到 {LlamaDir}（需保留 llama-server.exe）");
+            }
         }).ConfigureAwait(false);
     }
 
@@ -105,13 +128,13 @@ public partial class SetupWizardWindow : Window
         var dest = Path.Combine(LlamaDir, model.FileName);
         if (File.Exists(dest))
         {
-            Log($"模型已存在：{dest}，跳过下载");
+            Log($"模型已存在：{dest}，跳过下载（也支持手动下载 gguf 放到此路径）");
             _downloadedModelFile = model.FileName;
             BtnApplyModel.IsEnabled = true;
             TxtStatus.Text = "模型已就绪，可点「应用此模型」写入配置";
             return;
         }
-        await RunDownload(model.Url, dest, async () =>
+        await RunDownload(model.Url, dest, () =>
         {
             _downloadedModelFile = model.FileName;
             BtnApplyModel.IsEnabled = true;
@@ -120,9 +143,10 @@ public partial class SetupWizardWindow : Window
         }).ConfigureAwait(false);
     }
 
-    private async Task RunDownload(string url, string dest, Func<Task> onDone)
+    private async Task RunDownload(string url, string dest, Action onDone)
     {
         SetBusy(true);
+        try { Directory.CreateDirectory(LlamaDir); } catch { }
         _cts = new CancellationTokenSource();
         Progress<(long received, long total)> progress = new(t =>
         {
@@ -137,7 +161,8 @@ public partial class SetupWizardWindow : Window
             Log($"开始下载：{url}");
             TxtStatus.Text = $"下载中：{Path.GetFileName(dest)}";
             await Downloader.DownloadAsync(url, dest, progress, _cts.Token).ConfigureAwait(false);
-            await onDone().ConfigureAwait(false);
+            // 回调统一回 UI 线程执行（DownloadAsync 内部 ConfigureAwait(false) 已脱离 UI 上下文）
+            await Dispatcher.InvokeAsync(onDone);
         }
         catch (OperationCanceledException)
         {
@@ -147,6 +172,9 @@ public partial class SetupWizardWindow : Window
         catch (Exception ex)
         {
             Log($"下载失败：{ex.Message}");
+            Log($"可手动下载（地址见上方「开始下载」日志行），放到 {Path.GetDirectoryName(dest)} 后重试：" +
+                "llama.cpp 的 zip 放入后在向导重新下载同文件会触发自动解压，或自行解压到 llama 目录；" +
+                "模型 gguf 放入即视为就绪。");
             TxtStatus.Text = "下载失败（详见日志）";
         }
         finally

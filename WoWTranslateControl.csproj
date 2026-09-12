@@ -12,6 +12,7 @@
     <Authors>ijnokmsc</Authors>
     <Product>WoWTranslateControl by ijnokmsc</Product>
     <Description>WoWTranslate 本地翻译服务控制台：消息过滤管线 + 术语表 + llama-server 启停 + 多 Provider</Description>
+    <ApplicationIcon>assets\app.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <!-- 测试与冒烟工具独立编译，避免被主项目递归 glob 吞掉 -->
@@ -19,6 +20,11 @@
     <None Remove="tests\**" />
     <Compile Remove="tools\**" />
     <None Remove="tools\**" />
+    <!-- 应用图标：嵌入 exe（ApplicationIcon）+ 随构建输出（窗口 Icon 相对路径引用） -->
+    <None Include="assets\app.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>assets\app.ico</Link>
+    </None>
     <!-- Track B Direct DLL 资产随构建/发布自动输出到输出目录 assets\direct-dll（DllSwitcher 按 BaseDirectory 探测） -->
     <None Include="assets\direct-dll\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

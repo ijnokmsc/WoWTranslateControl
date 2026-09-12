@@ -1,4 +1,5 @@
 using System.IO;
+using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
 
@@ -6,10 +7,27 @@ namespace WoWTranslateControl;
 
 public partial class App : System.Windows.Application
 {
+    private static Mutex? _singleInstanceMutex;
+
     public App()
     {
         // 全局异常兜底：写 crash.log 后再弹窗，杜绝"运行无反应"式静默崩溃
         DispatcherUnhandledException += OnDispatcherUnhandledException;
+    }
+
+    protected override void OnStartup(StartupEventArgs e)
+    {
+        // 单实例互斥体：双开会导致 8080/8081 端口占用冲突，第二个实例直接退出
+        _singleInstanceMutex = new Mutex(true, "Local\\WoWTranslateControl.SingleInstance", out var createdNew);
+        if (!createdNew)
+        {
+            MessageBox.Show("WoWTranslate 控制台已在运行中（可能最小化在系统托盘）。\n" +
+                            "请从托盘恢复使用，勿重复启动——双开会造成端口占用冲突。",
+                "WoWTranslate 控制台", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Shutdown(0);
+            return;
+        }
+        base.OnStartup(e);
     }
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)

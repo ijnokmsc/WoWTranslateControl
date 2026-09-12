@@ -12,9 +12,18 @@ namespace WoWTranslateControl.Models;
 public sealed class AppConfig
 {
     // ---------- llama-server ----------
-    public string LlamaDir { get; set; } = @"D:\llama.cpp";
+    /// <summary>llama.cpp 目录。默认 = 运行目录\llama.cpp（便携化：新用户解压即用，向导也会自动生成此目录）。</summary>
+    public string LlamaDir { get; set; } = Path.Combine(AppContext.BaseDirectory, "llama.cpp");
     public string ModelFile { get; set; } = "Hy-MT2-1.8B-Q4_K_M.gguf";
-    public int Threads { get; set; } = 20;
+
+    private int _threads;
+    /// <summary>推理线程数。默认 = 逻辑核心数的一半（夹取 1..16），适配通用机器；老配置显式值优先。</summary>
+    public int Threads
+    {
+        get => _threads > 0 ? _threads : Math.Clamp(Environment.ProcessorCount / 2, 1, 16);
+        set => _threads = value;
+    }
+
     public int ContextSize { get; set; } = 2048;
     public int UpstreamPort { get; set; } = 8081;
     public bool AutoStartLlama { get; set; } = true;
