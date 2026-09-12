@@ -24,6 +24,11 @@ echo === build WoWTranslateDirect.dll (engine) ===
   /Fe:build\WoWTranslateDirect.dll src\direct_main.cpp src\translator.cpp src\wt_log.cpp ^
   /link winhttp.lib
 if errorlevel 1 goto fail
+rem cl.exe ICE 时 errorlevel 可能不置位（v24 实测），产物存在才算成功
+if not exist build\WoWTranslateDirect.dll (
+  echo engine DLL missing after compile - treating as failure
+  goto fail
+)
 
 if not exist ..\..\assets\direct-dll mkdir ..\..\assets\direct-dll
 copy /y build\dinput8.dll ..\..\assets\direct-dll\dinput8.dll >nul

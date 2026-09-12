@@ -199,7 +199,8 @@ local function Reconstruct(segs, translated)
   end
   return translated
 end
-
+)WTCDRIVER"
+R"WTCDRIVER(
 -- DLL Poll 返回 {"id":"..","translation":"..","error":".."} 的最小 JSON 字符串读取
 local function JsonGetString(json, key)
   if not json or not key then return nil end
@@ -250,7 +251,8 @@ local function JsonGetString(json, key)
   end
   return out
 end
-
+)WTCDRIVER"
+R"WTCDRIVER(
 -- 移植部署版 GS 插件 v2.3 的 StripChatPrefix：剥掉行首 [频道] [玩家]: 头
 --（超链接或纯文本变体，含 |c 色码），只把正文送翻译——链接/名字进模型只会诱发
 -- 幻觉（v20 实测：模型给译文加了 ？频道? 前缀）。返回剥完后的正文，空串=无可译。
@@ -380,6 +382,8 @@ local function HandleIncoming(frame, orig, text, r, g, b, id, hold)
   end
 end
 
+)WTCDRIVER"
+R"WTCDRIVER(
 -- ---- hook 聊天框 ----
 local hookedCount = 0
 for i = 1, NUM_CHAT_WINDOWS do
