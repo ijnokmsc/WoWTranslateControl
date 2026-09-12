@@ -478,13 +478,14 @@ static void TryInjectDriver(lua_State* L)
     int rc = ExecuteDriverChunk();
 
     char buf[160];
-    if (rc != 0)
+    if (rc == -2)
     {
-        // rc=-2：SEH。合法 chunkname/handler 下不应发生；发生了就停手（状态存疑，别再试）
+        // 只有 -2 是真 SEH；其他返回值是 FrameScript_Execute 的脚本嵌套计数
+        //（depth≤2 注入通常嵌在客户端脚本内 → 返回 1，属正常，v18 曾误判停手）
         InterlockedExchange(&g_driverDone, 1);
         InterlockedExchange(&g_driverBusy, 0);
-        _snprintf(buf, sizeof(buf), "driver inject SEH rc=%d attempt=%d - stopped",
-                  rc, (int)g_driverAttempts + 1);
+        _snprintf(buf, sizeof(buf), "driver inject SEH rc=-2 attempt=%d - stopped",
+                  (int)g_driverAttempts + 1);
         WT_LOG_ERROR(buf);
         return;
     }

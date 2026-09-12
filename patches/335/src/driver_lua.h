@@ -95,6 +95,10 @@ local SYSTEM_EVENTS = {
 local curChannel, curSystem = nil, false
 local pending, counter = {}, 0
 
+-- v19 诊断旗标（各只回报一次，进 DLL 日志定位链路断点）
+local dbgHooked, dbgCapture, dbgCjk = false, false, false
+local dbgQueueErr, dbgTransOk, dbgTransErr, dbgTimeout = false, false, false, false
+
 local function HasLatin(t)
   return string.find(t, "%a") ~= nil
 end
@@ -238,14 +242,23 @@ local function HandleIncoming(frame, orig, text, r, g, b, id, hold)
   if not curChannel or curSystem then
     return Passthrough(frame, orig, text, r, g, b, id, hold)
   end
-  -- 已含中文或纯符号/数字 → 不送翻
+  -- 已含中文或纯符号/数字 → 不送翻（首次记 diag 证明捕获链路是通的）
   if HasCJK(text) or not HasLatin(text) then
+    if not dbgCjk and HasCJK(text) then
+      dbgCjk = true
+      WoWTranslate_Diag("WTC_SKIP_CJK ch=" .. tostring(curChannel) .. " len=" .. tostring(string.len(text)))
+    end
     return Passthrough(frame, orig, text, r, g, b, id, hold)
   end
   local segs = SplitSegs(text)
   local toSend = BuildText(segs)
   if toSend == "" then
     return Passthrough(frame, orig, text, r, g, b, id, hold)
+  end
+  if not dbgCapture then
+    dbgCapture = true
+    WoWTranslate_Diag("WTC_CAPTURE ch=" .. tostring(curChannel) ..
+      " send=" .. string.sub(toSend, 1, 40))
   end
   counter = counter + 1
   local mid = tostring(counter)
@@ -254,7 +267,11 @@ local function HandleIncoming(frame, orig, text, r, g, b, id, hold)
                    r = r, g = g, b = b, id = id, hold = hold,
                    t = GetTime(), done = both }
   local ok = pcall(function()
-    WoWTranslate_Translate("\1" .. curChannel .. "\1" .. toSend, "en", "zh", mid)
+    local r = WoWTranslate_Translate("\1" .. curChannel .. "\1" .. toSend, "en", "zh", mid)
+    if r ~= "ok" and not dbgQueueErr then
+      dbgQueueErr = true
+      WoWTranslate_Diag("WTC_QUEUERR " .. tostring(r))
+    end
   end)
   if not ok then
     pending[mid] = nil
@@ -266,16 +283,19 @@ local function HandleIncoming(frame, orig, text, r, g, b, id, hold)
 end
 
 -- ---- hook 聊天框 ----
+local hookedCount = 0
 for i = 1, NUM_CHAT_WINDOWS do
   local f = getglobal("ChatFrame" .. i)
   if f and f.AddMessage and not f.WTCDirectHooked then
     f.WTCDirectHooked = true
+    hookedCount = hookedCount + 1
     local orig = f.AddMessage
     f.AddMessage = function(self, text, r, g, b, id, hold)
       HandleIncoming(self, orig, text, r, g, b, id, hold)
     end
   end
 end
+WoWTranslate_Diag("WTC_HOOKED windows=" .. tostring(NUM_CHAT_WINDOWS) .. " hooked=" .. tostring(hookedCount))
 
 -- ---- hook ChatFrame_OnEvent 记录频道（AddMessage 都发生在 origOnEvent 内部）----
 local origOnEvent = ChatFrame_OnEvent
@@ -306,10 +326,18 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
       p.done = true
       pending[id] = nil
       if er ~= "" then
+        if not dbgTransErr then
+          dbgTransErr = true
+          WoWTranslate_Diag("WTC_TRANSERR id=" .. id .. " err=" .. string.sub(er, 1, 80))
+        end
         if displayMode ~= "both" then
           p.orig(p.frame, p.text, p.r, p.g, p.b, p.id, p.hold)
         end
       else
+        if not dbgTransOk then
+          dbgTransOk = true
+          WoWTranslate_Diag("WTC_TRANSOK id=" .. id)
+        end
         local finalText = Reconstruct(p.segs, tr)
         if displayMode == "both" then
           p.orig(p.frame, dispPrefix .. finalText, p.r, p.g, p.b, p.id, p.hold)
@@ -324,6 +352,10 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
     if now - p.t > 30 then
       pending[mid] = nil
       if not p.done then
+        if not dbgTimeout then
+          dbgTimeout = true
+          WoWTranslate_Diag("WTC_TIMEOUT id=" .. mid .. " (translation never returned)")
+        end
         p.orig(p.frame, p.text, p.r, p.g, p.b, p.id, p.hold)
       end
     end
