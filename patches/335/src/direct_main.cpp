@@ -261,31 +261,45 @@ WT_NOINLINE static bool TryRegister(lua_State* L)
 
 // detour 辅助（在 Lua 主线程上跑，必须快、无分配、异常兜底）
 //
-// ⚠ GS 精确复刻（对齐其 79MB 日志实测行为）：
-// 1. stackUsed 门禁：读 L->top(+0xC) / L->base(+0x10)（GS 从 gettop 字节码推导的
-//    同款偏移）。stackUsed<=0 = 干净边界/初始化中的内部状态 —— 在那里注册会破坏
-//    半成品的 Lua 环境（实测 GlueXML 加载被打断 → ShowScene nil 崩溃）。
-//    只在真实脚本调用上下文（stackUsed>0）锁定并注册。GS 实测锁定值 stackUsed=16。
-// 2. one-shot：注册一次后永久直通，绝不对任何其他 L 重复注册。
+// ⚠ GS 精确复刻（对齐其 79MB 日志实测行为，两阶段）：
+// 1. 锁定 L：首个真实脚本调用上下文（gettop 返回 >0）的 L。
+// 2. 注册：等该 L 上栈深 <=2 的**浅栈边界**调用才注册 —— 绝不在深度脚本执行中
+//    修改全局表：GlueXML/AddOn 代码可能正在 next/pairs 迭代全局环境，中途插入
+//    8 个键触发 table rehash → 迭代失效 → 初始化函数丢失 → ShowScene nil 崩溃。
+//    （GS 实测注册时 "stack top before: 1"；re-register 允许 stackUsed=11）
+// 3. one-L：注册成功后同 L 直通；L 变化（/reload / 重登）→ 重新走两阶段。
+static lua_State* volatile g_lockedL = NULL;
 static volatile LONG g_registerDone = 0;
 
 static void OnGetTop(lua_State* L)
 {
     if (!L) return;
-    if (g_registerDone) return;            // 已完成 → 单分支直通
+    if (g_registerDone && L == g_registeredL) return;   // 完成+同 L → 单比较直通
 
-    if (L == g_registeredL) return;
+    // 调原函数（trampoline）拿真实栈深：top - base
+    int depth = ((fn_lua_gettop)g_pTrampoline)(L);
 
-    // stackUsed 门禁（GS 同款：top=+0xC base=+0x10）
-    DWORD top  = *(DWORD*)((BYTE*)L + 0xC);
-    DWORD base = *(DWORD*)((BYTE*)L + 0x10);
-    if (top <= base) return;               // 干净边界/未就绪状态 → 等真实脚本调用
+    if (L == g_lockedL)
+    {
+        if (depth > 2) return;              // 已锁定但深栈 → 等浅栈边界
+    }
+    else
+    {
+        if (depth <= 0) return;             // 新 L：只在真实脚本上下文锁定
+        g_lockedL = L;
+        char buf[96];
+        _snprintf(buf, sizeof(buf),
+                  "L locked: L=0x%08X depth=%d (waiting shallow stack to register)",
+                  (unsigned)(uintptr_t)L, depth);
+        WT_LOG_INFO(buf);
+        if (depth > 2) return;
+    }
 
     LONG n = InterlockedIncrement(&g_attemptCount);
-    if (n > 32)                            // 防失控：前 32 个候选里没注册成就放弃
+    if (n > 64)                             // 防失控：64 次没注册成就放弃
     {
         InterlockedExchange(&g_registerDone, 1);
-        WT_LOG_ERROR("give up registering after 32 candidate L values");
+        WT_LOG_ERROR("give up registering after 64 attempts");
         return;
     }
 
@@ -295,8 +309,8 @@ static void OnGetTop(lua_State* L)
         InterlockedExchange(&g_registerDone, 1);
         char buf[96];
         _snprintf(buf, sizeof(buf),
-                  "WoWTranslate_* registered into _G (one-shot, L=0x%08X stackUsed=%u)",
-                  (unsigned)(uintptr_t)L, (unsigned)(top - base));
+                  "WoWTranslate_* registered into _G (L=0x%08X depth=%d)",
+                  (unsigned)(uintptr_t)L, depth);
         WT_LOG_INFO(buf);
     }
 }
