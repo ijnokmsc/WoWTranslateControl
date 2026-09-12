@@ -298,11 +298,14 @@ end
 WoWTranslate_Diag("WTC_HOOKED windows=" .. tostring(NUM_CHAT_WINDOWS) .. " hooked=" .. tostring(hookedCount))
 
 -- ---- hook ChatFrame_OnEvent 记录频道（AddMessage 都发生在 origOnEvent 内部）----
+-- ⚠ 本客户端（3.3.5 AwesomeWotlk，与部署的 GS 插件 v2.3 一致）：以 (self, event, ...)
+-- 调用——vendor 1.12 版签名 function(event) 曾致 event=聊天框对象 → 频道永远 nil →
+-- 驱动加载成功但零捕获（v19 实测症状）。
 local origOnEvent = ChatFrame_OnEvent
-ChatFrame_OnEvent = function(event, ...)
+ChatFrame_OnEvent = function(self, event, ...)
   curChannel = CHANNELS[event]
   curSystem = SYSTEM_EVENTS[event] == true
-  local res = origOnEvent(event, ...)
+  local res = origOnEvent(self, event, ...)
   curChannel = nil
   curSystem = false
   return res
@@ -362,7 +365,7 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
   end
 end)
 
-DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r Direct driver v17 loaded (mode=" ..
+DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r Direct driver v20 loaded (mode=" ..
   displayMode .. (displayMode == "both" and (", prefix=" .. dispPrefix) or "") .. ")")
 
 end  -- WTC_MAIN
