@@ -1,8 +1,8 @@
-// direct_main.cpp — WoWTranslateDirect.dll 入口：hook lua_gettop → 捕获/重捕 L → 注册 WoWTranslate_*
+// direct_main.cpp — WoWTranslateDirect.dll 入口：hook lua_gettop → 一次性捕获 L → 注册 WoWTranslate_*
 //
 // 机制对齐 GS DLL（决定版地址表，三源互证 2026-09-11）：
 //   1. init 线程 sleep 3s 等客户端就绪 → 字节码序言校验 → 内联 hook lua_gettop(0x84DBD0)；
-//   2. detour 捕获第一参数 lua_State*（含 /reload 或重新登录后 L 变化的重捕获与重注册）；
+//   2. detour 一次性捕获第一参数 lua_State*（UI 主状态），注册后永久直通；
 //   3. lua_pushcclosure + lua_setfield(_G) 注册 WoWTranslate_{Version,GetLastError,Status,Configure,
 //      Translate,Poll,PendingCount,Diag}；
 //   4. 编码边界：入站 GBK→UTF-8（进 HTTP），出站 UTF-8→GBK（lua_pushstring 裸字节）。
@@ -260,21 +260,34 @@ WT_NOINLINE static bool TryRegister(lua_State* L)
 }
 
 // detour 辅助（在 Lua 主线程上跑，必须快、无分配、异常兜底）
+//
+// ⚠ 一次性策略（对齐 GS 原版行为）：
+// 客户端存在多个内部 lua_State（日志实测出现 8 个不同 L）。绝不能对每个新 L
+// 都 pushcclosure/setfield —— 那会在任意调用线程的非 UI 状态上修改全局表，
+// 绕过 Lua 单线程锁假设，实测把 GlueXML 加载打断（AccountLogin.lua ShowScene
+// nil → 登录界面崩溃）。首个捕获的 L 即 UI 主状态，注册一次后永久直通。
+static volatile LONG g_registerDone = 0;
+
 static void OnGetTop(lua_State* L)
 {
     if (!L) return;
+    if (g_registerDone) return;            // 已完成 → 单分支直通
 
-    // 已注册且 L 未变 → 单次指针比较，直接返回
     if (L == g_registeredL) return;
 
-    // 新 L（首次捕获 / reload / 重新登录）→ 重注册
     LONG n = InterlockedIncrement(&g_attemptCount);
-    if (n > 200) return; // 防失控：重试上限
+    if (n > 32)                            // 防失控：前 32 个 L 里没注册成就放弃
+    {
+        InterlockedExchange(&g_registerDone, 1);
+        WT_LOG_ERROR("give up registering after 32 candidate L values");
+        return;
+    }
 
     if (TryRegister(L))
     {
         g_registeredL = L;
-        WT_LOG_INFO("WoWTranslate_* registered into _G (L captured)");
+        InterlockedExchange(&g_registerDone, 1);
+        WT_LOG_INFO("WoWTranslate_* registered into _G (one-shot, L locked)");
     }
 }
 
