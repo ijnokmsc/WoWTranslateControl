@@ -190,3 +190,27 @@ public class BracketTagProtectionTests
     private static IReadOnlyList<GlossaryEntry> NoEntries() =>
         Array.Empty<GlossaryEntry>();
 }
+
+public class HallucinatedPlaceholderTests
+{
+    [Fact]
+    public void 模型无中生有的占位符_被清除()
+    {
+        // v24 实测：小模型从系统提示词示例抄来 ⟦G12⟧，map 里没有 → 显示给玩家
+        var map = new Dictionary<string, string> { ["⟦P0⟧"] = "[物品链接]", ["⟦G33⟧"] = "每秒伤害" };
+        var (restored, all) = GlossaryApplier.Restore("⟦G12⟧ ⟦P0⟧⟦G33⟧", map);
+        Assert.DoesNotContain("⟦", restored);
+        Assert.Contains("[物品链接]", restored);
+        Assert.Contains("每秒伤害", restored);
+        Assert.True(all); // 幻觉占位符已被清理，无残留
+    }
+
+    [Fact]
+    public void 占位符内带空格_仍能救回()
+    {
+        var map = new Dictionary<string, string> { ["⟦G3⟧"] = "谢谢" };
+        var (restored, all) = GlossaryApplier.Restore("⟦ G3 ⟧", map);
+        Assert.Equal("谢谢", restored);
+        Assert.True(all);
+    }
+}

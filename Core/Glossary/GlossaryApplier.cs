@@ -98,13 +98,24 @@ public static class GlossaryApplier
                 translated = translated.Replace(kv.Key, kv.Value);
         }
 
-        // 兜底：模型篡改了 ⟦ ⟧ 字符时按编号正则救回
+        // 兜底：模型篡改了 ⟦ ⟧ 字符时按编号正则救回（容忍占位符内多余空格；
+        // 查表 key 按编号归一化，匹配 map 里的规范形式）
         if (translated.Contains('⟦'))
         {
             translated = Regex.Replace(
                 translated,
-                @"⟦[GP](\d+)⟧",
-                m => map.TryGetValue(m.Value, out var v) ? v : m.Value);
+                @"⟦\s*([GP])\s*(\d+)\s*⟧",
+                m => map.TryGetValue("⟦" + m.Groups[1].Value + m.Groups[2].Value + "⟧",
+                    out var v) ? v : m.Value);
+        }
+
+        // 终审：模型无中生有的占位符（map 里没有对应项，如从提示词示例抄来的 ⟦G12⟧，
+        // v24 实测）对玩家是纯噪音，直接删除并压缩产生的连续空格
+        if (translated.Contains('⟦'))
+        {
+            var cleaned = Regex.Replace(translated, @"⟦\s*[GP]\s*\d+\s*⟧", " ");
+            if (cleaned != translated)
+                translated = Regex.Replace(cleaned, @"  +", " ").Trim();
         }
 
         var allRestored = !translated.Contains('⟦');
@@ -113,7 +124,8 @@ public static class GlossaryApplier
 
     /// <summary>附加到 system prompt 的占位符说明（仅当本条发生替换/保护时追加）。</summary>
     public const string PromptAddendum =
-        " The text contains placeholder tokens like ⟦G12⟧ (game terms) and ⟦P0⟧ " +
-        "(item links / UI markup). Keep every ⟦...⟧ token EXACTLY as-is in your " +
-        "output, do not translate, merge, reorder or drop them.";
+        " The text contains placeholder tokens in the form ⟦G<number>⟧ (game terms) " +
+        "and ⟦P<number>⟧ (item links / UI markup). Keep every ⟦...⟧ token EXACTLY " +
+        "as-is in your output, do not translate, merge, reorder or drop them. " +
+        "Never output a ⟦...⟧ token that was not present in the input.";
 }
