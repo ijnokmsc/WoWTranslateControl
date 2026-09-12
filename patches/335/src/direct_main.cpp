@@ -53,6 +53,8 @@ typedef int         (*fn_lua_gettop)(lua_State*);
 typedef void        (*fn_lua_pushstring)(lua_State*, const char*);
 typedef void        (*fn_lua_pushcclosure)(lua_State*, lua_CFunction, int);
 typedef void        (*fn_lua_settable)(lua_State*, int);   // 弹 key+value 写入表
+typedef void        (*fn_lua_getfield)(lua_State*, int, const char*); // 0x84E670（IDA 验明，压 1）
+typedef void        (*fn_lua_settop)(lua_State*, int);
 typedef const char* (*fn_lua_tolstring)(lua_State*, int, size_t*);
 typedef int         (*fn_lua_isstring)(lua_State*, int);
 typedef int         (*fn_lua_isnumber)(lua_State*, int);
@@ -62,6 +64,8 @@ static fn_lua_gettop        p_gettop;
 static fn_lua_pushstring    p_pushstring;
 static fn_lua_pushcclosure  p_pushcclosure;
 static fn_lua_settable      p_settable;
+static fn_lua_getfield      p_getfield;    // 0x84E670（IDA 验明真身，用于注册自检）
+static fn_lua_settop        p_settop;
 static fn_lua_tolstring     p_tolstring;
 static fn_lua_isstring      p_isstring;
 static fn_lua_isnumber      p_isnumber;
@@ -243,8 +247,10 @@ static RegEntry g_regs[] = {
 //   v1-v5 用它当 setfield 导致每对净 +2、8 对泄漏 16 slot（depthBefore=2 → depthAfter=18），
 //   Lua 栈从此不一致 → ShowScene nil。0x84E600 调用即 SEH（非 settable）。
 //   真 settable = 0x84E8D0（GS wow_register 内部 call 目标实锤 + 逐行反汇编吻合 5.1 源码）。
-// 防御：每对操作后校验栈深恢复，不匹配立即中止（最多泄漏一对，不伤 Lua 状态）。
-static bool TryRegisterCore(lua_State* L)
+// 防御：每对操作后校验栈深恢复，不匹配立即止损（最多泄漏一对，不伤 Lua 状态）。
+// 注册完成后自检：getfield(_G, "WoWTranslate_Version") 取回 tt 必须是 function(6)。
+// 返回：0=注册+自检 OK，1=SEH，2=栈深不匹配，3=自检失败（写进去了但取不回）
+static int TryRegisterCore(lua_State* L)
 {
     int depth0 = ((fn_lua_gettop)g_pTrampoline)(L);
     __try
@@ -257,22 +263,35 @@ static bool TryRegisterCore(lua_State* L)
 
             int depthNow = ((fn_lua_gettop)g_pTrampoline)(L);
             if (depthNow != depth0)
-                return false;   // 栈没恢复 → 地址错/状态坏，立即止损
+                return 2;   // 栈没恢复 → 地址错/状态坏，立即止损
         }
-        return true;
+
+        // ---- 注册自检：从 _G 取回函数验明类型 ----
+        p_getfield(L, LUA_GLOBALSINDEX, "WoWTranslate_Version");
+        DWORD top   = *(DWORD*)((BYTE*)L + 0xC);          // L->top（getfield 后已 +0x10）
+        int   tt    = *(int*)(top - 0x10 + 8);            // TValue.tt @ +8（3.3.5 布局）
+        p_settop(L, -2);                                  // 弹回自检值
+        if (tt != 6)                                      // LUA_TFUNCTION
+            return 3;
+
+        return 0;
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
     {
-        return false;
+        return 1;
     }
 }
 
-WT_NOINLINE static bool TryRegister(lua_State* L)
+WT_NOINLINE static int TryRegister(lua_State* L)
 {
-    if (TryRegisterCore(L))
-        return true;
-    WT_LOG_ERROR("register crashed, attempt=" + std::to_string(g_attemptCount));
-    return false;
+    int rc = TryRegisterCore(L);
+    if (rc == 0)
+        return 0;
+    char buf[96];
+    _snprintf(buf, sizeof(buf), "register failed rc=%d, attempt=%s",
+              rc, std::to_string(g_attemptCount).c_str());
+    WT_LOG_ERROR(buf);
+    return rc;
 }
 
 // detour 辅助（在 Lua 主线程上跑，必须快、无分配、异常兜底）
@@ -285,7 +304,9 @@ WT_NOINLINE static bool TryRegister(lua_State* L)
 // 2. 浅栈边界：depth<=2 才注册（GS 实测 stack top before: 1），避免在深度脚本
 //    执行中插入 8 键触发 rehash 打断 next/pairs 迭代。
 // 3. /reload 与重登：全局 L 指针变化 → 自动重置计数重走注册。
-static lua_State* volatile g_globalL = NULL;   // 已注册的全局状态
+static lua_State* volatile g_globalL = NULL;      // 已注册的全局状态
+static lua_State* volatile g_confirmedL = NULL;   // 已见 depth>0（真实脚本执行）的全局状态
+static lua_State* volatile g_seenGlobalL = NULL;  // 上次观察到的 *(0xD3F78C)，用于状态切换日志
 static volatile LONG g_registerDone = 0;
 
 static void OnGetTop(lua_State* L)
@@ -296,12 +317,37 @@ static void OnGetTop(lua_State* L)
     lua_State* cur = *(lua_State**)0xD3F78C;        // 客户端全局 lua_State
     if (!cur || L != cur) return;                   // 内部辅助状态 → 一律不碰
 
+    // 全局状态切换追踪（胶水态 → 世界态 → /reload 重建等）
+    if (cur != g_seenGlobalL)
+    {
+        g_seenGlobalL = cur;
+        char buf[80];
+        _snprintf(buf, sizeof(buf), "global L switched: 0x%08X", (unsigned)(uintptr_t)cur);
+        WT_LOG_INFO(buf);
+    }
+
     // 调原函数（trampoline）拿真实栈深：top - base
     int depth = ((fn_lua_gettop)g_pTrampoline)(L);
-    if (depth > 2) return;                          // 等浅栈边界
 
-    if (L != g_globalL)                             // 新全局状态（首次/reload/重登）
-        InterlockedExchange(&g_attemptCount, 0);    // → 重置计数重走注册
+    // 活性确认（GS 同款：call#1 stackUsed=0 被跳过，直到真实脚本执行才确认）：
+    // 新全局 L 首次必须出现在 depth>0 才可信 —— depth=0 的干净边界可能是
+    // 未就绪/临时状态（实测在 depth=0 注册后 /run 仍 nil）。
+    if (L != g_confirmedL)
+    {
+        if (depth <= 0) return;
+        g_confirmedL = L;
+        InterlockedExchange(&g_attemptCount, 0);    // 新状态 → 重置计数
+        char buf[96];
+        _snprintf(buf, sizeof(buf),
+                  "L confirmed alive: L=0x%08X depth=%d (waiting shallow stack)",
+                  (unsigned)(uintptr_t)L, depth);
+        WT_LOG_INFO(buf);
+        if (depth > 2) return;                      // 确认了但深栈 → 等浅栈
+    }
+    else if (depth <= 0 || depth > 2)
+    {
+        return;                                     // 只在 1..2 浅栈窗口注册
+    }
 
     LONG n = InterlockedIncrement(&g_attemptCount);
     if (n > 64)                                     // 该状态上 64 次没成功 → 放弃并不再刷屏
@@ -315,14 +361,14 @@ static void OnGetTop(lua_State* L)
         return;
     }
 
-    if (TryRegister(L))
+    if (TryRegister(L) == 0)
     {
         g_globalL = L;
         InterlockedExchange(&g_registerDone, 1);
         int depthAfter = ((fn_lua_gettop)g_pTrampoline)(L); // GS 同款栈恢复验证
         char buf[128];
         _snprintf(buf, sizeof(buf),
-                  "WoWTranslate_* registered into _G (L=0x%08X depthBefore=%d depthAfter=%d)",
+                  "WoWTranslate_* registered into _G (L=0x%08X depthBefore=%d depthAfter=%d) verify=OK",
                   (unsigned)(uintptr_t)L, depth, depthAfter);
         WT_LOG_INFO(buf);
     }
@@ -439,6 +485,8 @@ static DWORD WINAPI InitThread(LPVOID)
     p_pushstring   = (fn_lua_pushstring)0x84E350;
     p_pushcclosure = (fn_lua_pushcclosure)0x84E400;
     p_settable     = (fn_lua_settable)0x84E8D0;
+    p_getfield     = (fn_lua_getfield)0x84E670;   // IDA 验明真身（PyWoW 表标错为 setfield）
+    p_settop       = (fn_lua_settop)0x84DBF0;
     p_tolstring    = (fn_lua_tolstring)0x84E0E0;
     p_isstring     = (fn_lua_isstring)0x84DF60;
     p_isnumber     = (fn_lua_isnumber)0x84DF20;
