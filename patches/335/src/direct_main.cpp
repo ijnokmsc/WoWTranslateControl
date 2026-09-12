@@ -23,7 +23,9 @@ static LuaAddr g_addrs[] = {
     { 0x84DBF0, "lua_settop",       "\x55\x8B\xEC", 3 },
     { 0x84E350, "lua_pushstring",   "\x55\x8B\xEC", 3 },
     { 0x84E400, "lua_pushcclosure", "\x55\x8B\xEC", 3 },
-    { 0x84E670, "lua_setfield",     "\x55\x8B\xEC", 3 },
+    // ⚠ 真 settable = 0x84E600（index2adr + 弹 2 + luaV_settable，反汇编实锤）。
+    //   PyWoW 表的 0x84E670 实为 lua_getfield，曾致 16-slot 泄漏崩溃。
+    { 0x84E600, "lua_settable",     "\x55\x8B\xEC\x8B\x45\x0C\x56\x8B\x75\x08\x8B\xCE", 12 },
     { 0x84E0E0, "lua_tolstring",    "\x55\x8B\xEC", 3 },
     { 0x84DF60, "lua_isstring",     "\x55\x8B\xEC", 3 },
     { 0x84DF20, "lua_isnumber",     "\x55\x8B\xEC", 3 },
@@ -44,7 +46,7 @@ typedef int (*lua_CFunction)(lua_State* L);
 typedef int         (*fn_lua_gettop)(lua_State*);
 typedef void        (*fn_lua_pushstring)(lua_State*, const char*);
 typedef void        (*fn_lua_pushcclosure)(lua_State*, lua_CFunction, int);
-typedef void        (*fn_lua_setfield)(lua_State*, int, const char*);
+typedef void        (*fn_lua_settable)(lua_State*, int);   // 弹 key+value 写入表
 typedef const char* (*fn_lua_tolstring)(lua_State*, int, size_t*);
 typedef int         (*fn_lua_isstring)(lua_State*, int);
 typedef int         (*fn_lua_isnumber)(lua_State*, int);
@@ -53,7 +55,7 @@ typedef double      (*fn_lua_tonumber)(lua_State*, int);
 static fn_lua_gettop        p_gettop;
 static fn_lua_pushstring    p_pushstring;
 static fn_lua_pushcclosure  p_pushcclosure;
-static fn_lua_setfield      p_setfield;
+static fn_lua_settable      p_settable;
 static fn_lua_tolstring     p_tolstring;
 static fn_lua_isstring      p_isstring;
 static fn_lua_isnumber      p_isnumber;
@@ -230,18 +232,26 @@ static RegEntry g_regs[] = {
     { "WoWTranslate_Diag",         L_Diag },
 };
 
-// 在 detour（Lua 主线程）内调用：注册 8 个全局函数到 _G。
-// 所有操作栈平衡（pushcclosure 压 1，setfield 弹 2 —— 名串 + 闭包）。
-// 注意：MSVC 规定含 __try 的函数体不得有任何需展开的 C++ 对象，
-//       所以 core（SEH）/wrapper（日志）必须拆两层。
+// 在 detour（Lua 主线程）内调用：GS 三件套注册（pushstring + pushcclosure + settable）。
+// 栈平衡：每对 pushstring(+1) + pushcclosure(+1) + settable(-2) = 净 0。
+// ⚠ 地址表血泪教训：PyWoW 表的 0x84E670 实为 lua_getfield（压 1 不弹）——
+//   v1-v5 用它当 setfield 导致每对净 +2、8 对泄漏 16 slot（depthBefore=2 → depthAfter=18），
+//   Lua 栈从此不一致 → ShowScene nil。真 settable = 0x84E600（反汇编实锤弹 2）。
+// 防御：每对操作后校验栈深恢复，不匹配立即中止（最多泄漏一对，不伤 Lua 状态）。
 static bool TryRegisterCore(lua_State* L)
 {
+    int depth0 = ((fn_lua_gettop)g_pTrampoline)(L);
     __try
     {
         for (int i = 0; i < (int)(sizeof(g_regs) / sizeof(g_regs[0])); ++i)
         {
+            p_pushstring(L, g_regs[i].name);
             p_pushcclosure(L, g_regs[i].fn, 0);
-            p_setfield(L, LUA_GLOBALSINDEX, g_regs[i].name);
+            p_settable(L, LUA_GLOBALSINDEX);
+
+            int depthNow = ((fn_lua_gettop)g_pTrampoline)(L);
+            if (depthNow != depth0)
+                return false;   // 栈没恢复 → 地址错/状态坏，立即止损
         }
         return true;
     }
@@ -426,7 +436,7 @@ static DWORD WINAPI InitThread(LPVOID)
     p_gettop       = (fn_lua_gettop)0x84DBD0;
     p_pushstring   = (fn_lua_pushstring)0x84E350;
     p_pushcclosure = (fn_lua_pushcclosure)0x84E400;
-    p_setfield     = (fn_lua_setfield)0x84E670;
+    p_settable     = (fn_lua_settable)0x84E600;
     p_tolstring    = (fn_lua_tolstring)0x84E0E0;
     p_isstring     = (fn_lua_isstring)0x84DF60;
     p_isnumber     = (fn_lua_isnumber)0x84DF20;
