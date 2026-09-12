@@ -233,67 +233,11 @@ local function JsonGetString(json, key)
   return out
 end
 
-local function Passthrough(frame, orig, text, r, g, b, id, hold)
-  return orig(frame, text, r, g, b, id, hold)
-end
-
-local function HandleIncoming(frame, orig, text, r, g, b, id, hold)
-  if not text then return Passthrough(frame, orig, text, r, g, b, id, hold) end
-  if not curChannel or curSystem then
-    return Passthrough(frame, orig, text, r, g, b, id, hold)
-  end
-  -- 先剥 [频道] [玩家]: 头，正文才做语言判断与翻译（头里的中文频道名不该触发跳过）
-  local body = StripChatPrefixBody(text)
-  if body == "" then
-    return Passthrough(frame, orig, text, r, g, b, id, hold)
-  end
-  -- 正文已含中文或纯符号/数字 → 不送翻（首次记 diag 证明捕获链路是通的）
-  if HasCJK(body) or not HasLatin(body) then
-    if not dbgCjk and HasCJK(body) then
-      dbgCjk = true
-      WoWTranslate_Diag("WTC_SKIP_CJK ch=" .. tostring(curChannel) .. " body=" .. string.sub(body, 1, 60))
-    end
-    return Passthrough(frame, orig, text, r, g, b, id, hold)
-  end
-  local segs = SplitSegs(body)
-  local toSend = BuildText(segs)
-  if toSend == "" then
-    return Passthrough(frame, orig, text, r, g, b, id, hold)
-  end
-  if not dbgCapture then
-    dbgCapture = true
-    -- 取证：原始 AddMessage 全文（含超链接原始字节，定位乱码来源）
-    WoWTranslate_Diag("WTC_RAW ch=" .. tostring(curChannel) ..
-      " text=" .. string.sub(text, 1, 200))
-    WoWTranslate_Diag("WTC_CAPTURE ch=" .. tostring(curChannel) ..
-      " send=" .. string.sub(toSend, 1, 60))
-  end
-  counter = counter + 1
-  local mid = tostring(counter)
-  local both = (displayMode == "both")
-  pending[mid] = { frame = frame, orig = orig, text = text, segs = segs,
-                   prefix = string.sub(text, 1, #text - #body),
-                   r = r, g = g, b = b, id = id, hold = hold,
-                   t = GetTime(), done = both }
-  local ok = pcall(function()
-    local r = WoWTranslate_Translate("\1" .. curChannel .. "\1" .. toSend, "en", "zh", mid)
-    if r ~= "ok" and not dbgQueueErr then
-      dbgQueueErr = true
-      WoWTranslate_Diag("WTC_QUEUERR " .. tostring(r))
-    end
-  end)
-  if not ok then
-    pending[mid] = nil
-    return Passthrough(frame, orig, text, r, g, b, id, hold)
-  end
-  if both then
-    orig(frame, text, r, g, b, id, hold)
-  end
-end
-
 -- 移植部署版 GS 插件 v2.3 的 StripChatPrefix：剥掉行首 [频道] [玩家]: 头
 --（超链接或纯文本变体，含 |c 色码），只把正文送翻译——链接/名字进模型只会诱发
 -- 幻觉（v20 实测：模型给译文加了 ？频道? 前缀）。返回剥完后的正文，空串=无可译。
+-- ⚠ 必须定义在 HandleIncoming 之前：local 函数定义顺序=可见性（v22 曾因放后面
+--   在 HandleIncoming 里落空成全局 nil，游戏内报 attempt to call global）。
 local function StripChatPrefixBody(text)
   if not text then return "" end
   local t = text
@@ -351,6 +295,64 @@ local function StripChatPrefixBody(text)
   end
   t = string.gsub(t, "^%s+", "")
   return t
+end
+
+local function Passthrough(frame, orig, text, r, g, b, id, hold)
+  return orig(frame, text, r, g, b, id, hold)
+end
+
+local function HandleIncoming(frame, orig, text, r, g, b, id, hold)
+  if not text then return Passthrough(frame, orig, text, r, g, b, id, hold) end
+  if not curChannel or curSystem then
+    return Passthrough(frame, orig, text, r, g, b, id, hold)
+  end
+  -- 先剥 [频道] [玩家]: 头，正文才做语言判断与翻译（头里的中文频道名不该触发跳过）
+  local body = StripChatPrefixBody(text)
+  if body == "" then
+    return Passthrough(frame, orig, text, r, g, b, id, hold)
+  end
+  -- 正文已含中文或纯符号/数字 → 不送翻（首次记 diag 证明捕获链路是通的）
+  if HasCJK(body) or not HasLatin(body) then
+    if not dbgCjk and HasCJK(body) then
+      dbgCjk = true
+      WoWTranslate_Diag("WTC_SKIP_CJK ch=" .. tostring(curChannel) .. " body=" .. string.sub(body, 1, 60))
+    end
+    return Passthrough(frame, orig, text, r, g, b, id, hold)
+  end
+  local segs = SplitSegs(body)
+  local toSend = BuildText(segs)
+  if toSend == "" then
+    return Passthrough(frame, orig, text, r, g, b, id, hold)
+  end
+  if not dbgCapture then
+    dbgCapture = true
+    -- 取证：原始 AddMessage 全文（含超链接原始字节，定位乱码来源）
+    WoWTranslate_Diag("WTC_RAW ch=" .. tostring(curChannel) ..
+      " text=" .. string.sub(text, 1, 200))
+    WoWTranslate_Diag("WTC_CAPTURE ch=" .. tostring(curChannel) ..
+      " send=" .. string.sub(toSend, 1, 60))
+  end
+  counter = counter + 1
+  local mid = tostring(counter)
+  local both = (displayMode == "both")
+  pending[mid] = { frame = frame, orig = orig, text = text, segs = segs,
+                   prefix = string.sub(text, 1, #text - #body),
+                   r = r, g = g, b = b, id = id, hold = hold,
+                   t = GetTime(), done = both }
+  local ok = pcall(function()
+    local r = WoWTranslate_Translate("\1" .. curChannel .. "\1" .. toSend, "en", "zh", mid)
+    if r ~= "ok" and not dbgQueueErr then
+      dbgQueueErr = true
+      WoWTranslate_Diag("WTC_QUEUERR " .. tostring(r))
+    end
+  end)
+  if not ok then
+    pending[mid] = nil
+    return Passthrough(frame, orig, text, r, g, b, id, hold)
+  end
+  if both then
+    orig(frame, text, r, g, b, id, hold)
+  end
 end
 
 -- ---- hook 聊天框 ----
