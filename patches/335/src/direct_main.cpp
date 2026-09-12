@@ -76,7 +76,6 @@ static BYTE*  g_hookTarget = NULL; // 0x84DBD0 实际地址
 
 static volatile LONG  g_hookInstalled = 0;
 static volatile LONG  g_attemptCount = 0;
-static lua_State* volatile g_registeredL = NULL; // 已完成注册（或上次尝试）的 L
 
 // ==================== 日志辅助 ====================
 
@@ -278,51 +277,47 @@ WT_NOINLINE static bool TryRegister(lua_State* L)
 
 // detour 辅助（在 Lua 主线程上跑，必须快、无分配、异常兜底）
 //
-// ⚠ GS 精确复刻（对齐其 79MB 日志实测行为，两阶段）：
-// 1. 锁定 L：首个真实脚本调用上下文（gettop 返回 >0）的 L。
-// 2. 注册：等该 L 上栈深 <=2 的**浅栈边界**调用才注册 —— 绝不在深度脚本执行中
-//    修改全局表：GlueXML/AddOn 代码可能正在 next/pairs 迭代全局环境，中途插入
-//    8 个键触发 table rehash → 迭代失效 → 初始化函数丢失 → ShowScene nil 崩溃。
-//    （GS 实测注册时 "stack top before: 1"；re-register 允许 stackUsed=11）
-// 3. one-L：注册成功后同 L 直通；L 变化（/reload / 重登）→ 重新走两阶段。
-static lua_State* volatile g_lockedL = NULL;
+// ⚠ 决定性设计（IDA 实锤 + 日志教训）：
+// 1. 全局 L 门禁：0xD3F78C = 客户端全局 lua_State（FrameScript_Execute 用它跑 /run，
+//    反编译铁证）。只在捕获 L == 该指针时注册 —— 客户端存在多个内部辅助状态
+//    （日志实测 0x270083F8/0x3E8AB4F0 交替调 gettop），对它们注册纯属浪费且
+//    会让 attempts 计数虚耗在错误目标上，/run 的 UI 状态反而轮不到。
+// 2. 浅栈边界：depth<=2 才注册（GS 实测 stack top before: 1），避免在深度脚本
+//    执行中插入 8 键触发 rehash 打断 next/pairs 迭代。
+// 3. /reload 与重登：全局 L 指针变化 → 自动重置计数重走注册。
+static lua_State* volatile g_globalL = NULL;   // 已注册的全局状态
 static volatile LONG g_registerDone = 0;
 
 static void OnGetTop(lua_State* L)
 {
     if (!L) return;
-    if (g_registerDone && L == g_registeredL) return;   // 完成+同 L → 单比较直通
+    if (g_registerDone && L == g_globalL) return;   // 完成+同全局 L → 单比较直通
+
+    lua_State* cur = *(lua_State**)0xD3F78C;        // 客户端全局 lua_State
+    if (!cur || L != cur) return;                   // 内部辅助状态 → 一律不碰
 
     // 调原函数（trampoline）拿真实栈深：top - base
     int depth = ((fn_lua_gettop)g_pTrampoline)(L);
+    if (depth > 2) return;                          // 等浅栈边界
 
-    if (L == g_lockedL)
-    {
-        if (depth > 2) return;              // 已锁定但深栈 → 等浅栈边界
-    }
-    else
-    {
-        if (depth <= 0) return;             // 新 L：只在真实脚本上下文锁定
-        g_lockedL = L;
-        char buf[96];
-        _snprintf(buf, sizeof(buf),
-                  "L locked: L=0x%08X depth=%d (waiting shallow stack to register)",
-                  (unsigned)(uintptr_t)L, depth);
-        WT_LOG_INFO(buf);
-        if (depth > 2) return;
-    }
+    if (L != g_globalL)                             // 新全局状态（首次/reload/重登）
+        InterlockedExchange(&g_attemptCount, 0);    // → 重置计数重走注册
 
     LONG n = InterlockedIncrement(&g_attemptCount);
-    if (n > 64)                             // 防失控：64 次没注册成就放弃
+    if (n > 64)                                     // 该状态上 64 次没成功 → 放弃并不再刷屏
     {
-        InterlockedExchange(&g_registerDone, 1);
-        WT_LOG_ERROR("give up registering after 64 attempts");
+        if (!g_registerDone)
+        {
+            WT_LOG_ERROR("give up registering this global L after 64 attempts");
+            g_globalL = L;                          // 阻断重复尝试与日志刷屏
+            InterlockedExchange(&g_registerDone, 1);
+        }
         return;
     }
 
     if (TryRegister(L))
     {
-        g_registeredL = L;
+        g_globalL = L;
         InterlockedExchange(&g_registerDone, 1);
         int depthAfter = ((fn_lua_gettop)g_pTrampoline)(L); // GS 同款栈恢复验证
         char buf[128];
