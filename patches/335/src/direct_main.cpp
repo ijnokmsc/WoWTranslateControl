@@ -307,10 +307,11 @@ static void OnGetTop(lua_State* L)
     {
         g_registeredL = L;
         InterlockedExchange(&g_registerDone, 1);
-        char buf[96];
+        int depthAfter = ((fn_lua_gettop)g_pTrampoline)(L); // GS 同款栈恢复验证
+        char buf[128];
         _snprintf(buf, sizeof(buf),
-                  "WoWTranslate_* registered into _G (L=0x%08X depth=%d)",
-                  (unsigned)(uintptr_t)L, depth);
+                  "WoWTranslate_* registered into _G (L=0x%08X depthBefore=%d depthAfter=%d)",
+                  (unsigned)(uintptr_t)L, depth, depthAfter);
         WT_LOG_INFO(buf);
     }
 }
@@ -407,10 +408,13 @@ static DWORD WINAPI InitThread(LPVOID)
     wt::LogInit();
     WT_LOG_INFO("WoWTranslateDirect 1.0 init (Track B direct engine)");
 
-    // ⚠ 不等待！必须在 Lua 初始化之前装好 hook（对齐 GS 的 DllMain 即时 hook）。
-    // 之前等 3 秒的后果：hook 落在 GlueXML 加载中途，首个捕获的 L 是加载线程的
-    // 内部状态，注册动作与该线程竞态 → 打断 GlueXML 加载 → ShowScene nil 崩溃。
-    // Lua 未初始化时 gettop 不会被调用，hook 静等第一次调用（必在 UI 主线程）。
+    // ⚠ GS 原版时序复刻："Init thread started, sleeping 3s... → Attempting hook..."
+    // GS 的 init 线程睡 3 秒等客户端核心初始化完成后再装 hook —— 我们 v2-v4 删掉
+    // 等待后 hook 覆盖了整个 Lua 初始化窗口， detour 参与了初始化全程，实测四种
+    // 注册时机（stackUsed>0 / one-shot / 浅栈）全崩 → 问题在 hook 窗口而非注册时机。
+    // Lua 初始化期间 gettop 调用极少（3s 内几乎无 Lua 活动），等 3 秒对捕获无影响。
+    Sleep(3000);
+    WT_LOG_INFO("sleep 3s done, attempting hook (GS-original timing)");
 
     if (!VerifyAddresses())
     {
