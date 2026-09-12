@@ -262,71 +262,53 @@ local function StripChatPrefixBody(text)
   if not text then return "", "" end
   -- 全角冒号归一化：zhCN 聊天格式用 ：，统一成 : 后所有模式可复用
   local w = string.gsub(text, "：" , ":")
+  local header = ""            -- 被剥离的头部件原样累积，显示时拼回译文前
   local hadChannel = false
   local nameConsumed = false
-  w = string.gsub(w, "^%s+", "")
-  w = string.gsub(w, "^|c%x%x%x%x%x%x%x%x", "")
-  w = string.gsub(w, "^%s+", "")
-  -- 频道头：超链接形态（自定义频道）或 纯文本 [频道名] 形态（本地防御/寻求组队等系统频道）
-  local t2 = string.gsub(w, "^|Hchannel:[^|]-|h.-|h", "")
-  if t2 ~= w then
-    w = t2
-    hadChannel = true
-  else
-    t2 = string.gsub(w, "^%[[^%]]-%]%s+%[[^%]]-%]%s*:%s*", "")
-    if t2 ~= w then
-      w = t2
-      hadChannel = true
-      nameConsumed = true
-    else
-      t2 = string.gsub(w, "^%[[^%]]-%]%s+[%w_%-]+%s*:%s*", "")
-      if t2 ~= w then
-        w = t2
-        hadChannel = true
-        nameConsumed = true
-      end
+
+  -- 逐段消费头部：每段消费到的原文都累积进 header
+  local function consume(pat)
+    local out, n = string.gsub(w, pat, function(m)
+      header = header .. m
+      return ""
+    end)
+    if n > 0 then w = out end
+    return n > 0
+  end
+
+  for _ = 1, 8 do
+    local before = #w
+    consume("^%s+")
+    consume("^|c%x%x%x%x%x%x%x%x")
+    consume("^%s+")
+    if consume("^|Hchannel:[^|]-|h.-|h") then hadChannel = true end
+    if consume("^%[[^%]]-%]%s+%[[^%]]-%]%s*:%s*") then hadChannel = true; nameConsumed = true end
+    if consume("^%[[^%]]-%]%s+[%w_%-]+%s*:%s*") then hadChannel = true; nameConsumed = true end
+    if consume("^|Hplayer:[^|]-|h.-|h") then nameConsumed = true end
+    if consume("^%[[^%]]-%]%s*:%s*") then nameConsumed = true end
+    if consume("^%[[^%]]-%]|r%s*:%s*") then nameConsumed = true end
+    consume("^|r")
+    consume("^%s*:%s*")
+    if hadChannel and not nameConsumed then
+      if consume("^[%w_%-]+%s*:%s*") then nameConsumed = true end
     end
+    if #w == before then break end   -- 无进展 = 头部剥完
   end
-  w = string.gsub(w, "^%s+", "")
-  w = string.gsub(w, "^|c%x%x%x%x%x%x%x%x", "")
-  w = string.gsub(w, "^|r", "")
-  -- 发送者：超链接形态 或 [名字]: 形态
-  local t3 = string.gsub(w, "^|Hplayer:[^|]-|h.-|h", "")
-  if t3 ~= w then
-    w = t3
-    nameConsumed = true
-  else
-    t3 = string.gsub(w, "^%[[^%]]-%]%s*:%s*", "")
-    if t3 ~= w then
-      w = t3
-      nameConsumed = true
-    else
-      t3 = string.gsub(w, "^%[[^%]]-%]|r%s*:%s*", "")
-      if t3 ~= w then
-        w = t3
-        nameConsumed = true
-      end
-    end
-  end
-  w = string.gsub(w, "^|r", "")
-  w = string.gsub(w, "^%s*:%s*", "")
-  if hadChannel and not nameConsumed then
-    w = string.gsub(w, "^[%w_%-]+%s*:%s*", "")
-  end
+
   -- zhCN 动词前缀（"说：/大喊：/密语："…）：名字剥掉后残留的纯中文短前缀+冒号。
-  -- 限定"纯中文且 <=12 字节"——含 ASCII 的正文（如 hello:world）绝不误伤
+  -- 限定"纯中文且 <=12 字节"——含 ASCII 的正文（如 hello:world）绝不误伤；
+  -- 动词连同冒号归入 header（显示时与原文观感一致）
   if nameConsumed then
-    local frag = string.match(w, "^(.-):")
-    if frag and #frag <= 12 and frag ~= "" and not string.find(frag, "[a-zA-Z0-9]") then
-      w = string.sub(w, #frag + 2)
-      w = string.gsub(w, "^%s+", "")
+    local frag, rest = string.match(w, "^(.-)(:.*)$")
+    if frag and rest and #frag <= 12 and frag ~= "" and not string.find(frag, "[a-zA-Z0-9]") then
+      header = header .. frag .. ":"
+      w = string.gsub(rest, "^%s+", "")
     end
   end
   w = string.gsub(w, "^%s+", "")
-  -- body 是 w 的后缀：prefix 从 w 头部取（归一化后的头，显示时 ： 变 : 属可接受差异）
+
   local body = w
-  local prefix = string.sub(w, 1, #w - #body)
-  return body, prefix
+  return body, header
 end
 
 local function Passthrough(frame, orig, text, r, g, b, id, hold)
