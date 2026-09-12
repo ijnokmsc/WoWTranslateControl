@@ -248,38 +248,25 @@ static RegEntry g_regs[] = {
     { "WoWTranslate_Diag",         L_Diag },
 };
 
-// 在 detour（Lua 主线程）内调用。v12 设计（2026-09-12，IDA 反汇编定案）：
-// 结构探针 → 尝试 A（官方模式：gt TValue 压栈 + settable(-3)）→ 尝试 B（写 gt.__index 函数库表）。
-// 可见性自检 = 模拟 /run 的 OP_GETGLOBAL：raw 读 gt，miss 后走 __index 链。
+// 在 detour（Lua 主线程）内调用。v13 定案（2026-09-12，用户实测背书）：
+// 结构探针（TValue 直读）→ 尝试 A（官方模式：gt TValue 压栈 + settable(-3)）→ 返回成功。
+// 写入路径已被用户实测证实（/run print(type(WoWTranslate_Version)) == function，
+// _G 无元表 nometa）；读回（rawget+TopTT）降级为诊断信息——v10-v12 三版假阴性
+// （rc=3 / rc=5）全部出自读回端，getfield 读 print 也得 0。
 // ⚠ __try 内禁止 std::string（C2712），所有结果存全局变量，由 TryRegister 在 __try 外打日志。
-// 返回：0=A 成功，6=B 成功，1=SEH，2=栈深异常，4=gt 不是表，5=无 __index 表，7=A 后可见性失败且 B 不适用
+// 返回：0=写入+栈平衡 OK（读回值仅诊断），1=SEH，2=栈深异常，4=gt 不是表
 static volatile LONG g_pG        = -1;   // *(L+0x14) = global_State
 static volatile LONG g_pRegV     = -1;   // G+0x68 TValue.value（-10000 目标）
 static volatile LONG g_pRegTT    = -1;
 static volatile LONG g_pGtV      = -1;   // L+0x48 TValue.value（-10002 目标 = gt）
 static volatile LONG g_pGtTT     = -1;
-static volatile LONG g_ttRegPrint = -1;  // getfield(-10000,"print")
-static volatile LONG g_ttGtPrint  = -1;  // getfield(-10002,"print")
-static volatile LONG g_ttEnvPrint = -1;  // getfield(-10001,"print")
-static volatile LONG g_ttRegVer   = -1;  // getfield(-10000,"WoWTranslate_Version")（v11 遗留写回读）
-static volatile LONG g_ttGtVer0   = -1;  // 注册前 getfield(-10002,"WoWTranslate_Version")
-static volatile LONG g_ttA_ver    = -1;  // A 后 raw 读 gt
-static volatile LONG g_ttB_vis    = -1;  // B 后 OP_GETGLOBAL 模拟
-static volatile LONG g_rcPath     = -1;  // 0=A，1=B
+static volatile LONG g_ttA_ver   = -1;  // A 后 rawget 读回（诊断值）
+static volatile LONG g_rcPath    = -1;  // 0=A
 
 // 读 (top-1) 槽的 TValue.tt（3.3.5 布局：value 8B @0，tt @+8，warden shadow @+12）
 static int TopTT(lua_State* L)
 {
     return *(int*)(*(DWORD*)((BYTE*)L + 0xC) - 0x10 + 8);
-}
-
-// getfield(idx, name) → 读 tt → 弹回。只能在 __try 内调用。
-static int ProbeTT(lua_State* L, int idx, const char* name)
-{
-    p_getfield(L, idx, name);
-    int tt = TopTT(L);
-    p_settop(L, -2);
-    return tt;
 }
 
 // 模拟 /run 的 OP_GETGLOBAL：raw 读 gt，miss 后走 __index 表（raw 读链）。
@@ -319,22 +306,12 @@ static int TryRegisterCore(lua_State* L)
     {
         BYTE* Lb = (BYTE*)L;
 
-        // ---------- 结构探针（一次运行回答所有布局问题）----------
+        // ---------- 结构探针（TValue 直读——v12 实锤唯一可靠的读法；
+        //            getfield 读回 print 也得 0 而 print 必在 _G，读路径弃用）----------
         DWORD G = *(DWORD*)(Lb + 0x14);
         g_pG = (LONG)G;
         g_pRegV = *(DWORD*)(G + 0x68);  g_pRegTT = *(int*)(G + 0x68 + 8);
         g_pGtV  = *(DWORD*)(Lb + 0x48); g_pGtTT  = *(int*)(Lb + 0x48 + 8);
-        if ((g_pRegTT & 0x1F) == 5)
-        {
-            g_ttRegPrint = ProbeTT(L, -10000, "print");
-            g_ttRegVer   = ProbeTT(L, -10000, "WoWTranslate_Version");
-        }
-        if ((g_pGtTT & 0x1F) == 5)
-        {
-            g_ttGtPrint = ProbeTT(L, -10002, "print");
-            g_ttGtVer0  = ProbeTT(L, -10002, "WoWTranslate_Version");
-        }
-        g_ttEnvPrint = ProbeTT(L, -10001, "print");
 
         // ---------- 尝试 A：官方模式——gt TValue 压栈 + settable(-3) ----------
         if ((g_pGtTT & 0x1F) != 5)
@@ -355,44 +332,13 @@ static int TryRegisterCore(lua_State* L)
         }
         p_settop(L, -2);                                 // 弹出 gt 副本
 
-        g_ttA_ver = ProbeTT(L, LUA_GLOBALSINDEX_L48, "WoWTranslate_Version");
-        if ((g_ttA_ver & 0x1F) == 6)
-        {
-            g_rcPath = 0;
-            return 0;                                    // raw 写 gt 成功，/run raw 命中
-        }
-
-        // ---------- 尝试 B：写入 gt.__index（客户端函数库表 t2）----------
-        top = *(DWORD*)(Lb + 0xC);
-        memcpy((void*)top, Lb + 0x48, 16);               // [gt]
-        *(DWORD*)(Lb + 0xC) = top + 16;
-        p_pushstring(L, "__index");                      // [gt, "__index"]
-        p_rawget(L, -2);                                 // [gt, t2?]（裸读）
-        int ttT2 = TopTT(L);
-        if ((ttT2 & 0x1F) != 5)
-        {
-            p_settop(L, -2);                             // 弹 t2 槽
-            p_settop(L, -2);                             // 弹 gt
-            g_rcPath = 2;
-            return 5;                                    // gt 无 __index 表
-        }
-        for (int i = 0; i < (int)(sizeof(g_regs) / sizeof(g_regs[0])); ++i)
-        {
-            p_pushstring(L, g_regs[i].name);             // [gt,t2,name]
-            p_pushcclosure(L, g_regs[i].fn, 0);          // [gt,t2,name,fn]
-            p_settable(L, -3);                           // t2[name]=fn → [gt,t2]
-            int depthNow = ((fn_lua_gettop)g_pTrampoline)(L);
-            if (depthNow != depth0 + 2)
-                return 2;
-        }
-        p_settop(L, -3);                                 // 弹 t2+gt
-        g_ttB_vis = VisibilityTT(L);
-        if ((g_ttB_vis & 0x1F) == 6)
-        {
-            g_rcPath = 1;
-            return 6;                                    // 经 __index 链可见
-        }
-        return 7;
+        // ---------- 读回（仅记录，非致命）----------
+        // v13 定案（用户实测背书）：写入 = 客户端 wow_register 官方同款三件套 + 栈平衡校验，
+        // /run 已实测返回 function —— 写入端可信。v10-v12 三版假阴性全部出自读回端
+        // （getfield 读 print 也得 0），故读回值降级为诊断信息，不再阻止注册完成。
+        g_ttA_ver = VisibilityTT(L);
+        g_rcPath = 0;
+        return 0;
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
     {
@@ -403,26 +349,22 @@ static int TryRegisterCore(lua_State* L)
 WT_NOINLINE static int TryRegister(lua_State* L)
 {
     int rc = TryRegisterCore(L);
-    if (rc == 0 || rc == 6)
+    if (rc == 0)
         return rc;
 
     char buf[400];
     if (g_attemptCount == 1)
     {
         _snprintf(buf, sizeof(buf),
-                  "probe G=0x%08X reg{v=0x%08X tt=%d} gt{v=0x%08X tt=%d} "
-                  "print[reg=%d gt=%d env=%d] ver[reg=%d gt0=%d]",
+                  "probe G=0x%08X reg{v=0x%08X tt=%d} gt{v=0x%08X tt=%d}",
                   (unsigned)g_pG,
                   (unsigned)g_pRegV, (int)g_pRegTT,
-                  (unsigned)g_pGtV, (int)g_pGtTT,
-                  (int)g_ttRegPrint, (int)g_ttGtPrint, (int)g_ttEnvPrint,
-                  (int)g_ttRegVer, (int)g_ttGtVer0);
+                  (unsigned)g_pGtV, (int)g_pGtTT);
         WT_LOG_INFO(buf);
     }
     _snprintf(buf, sizeof(buf),
-              "register failed rc=%d path=%d ttA=%d ttBvis=%d, attempt=%s",
-              rc, (int)g_rcPath, (int)g_ttA_ver, (int)g_ttB_vis,
-              std::to_string(g_attemptCount).c_str());
+              "register failed rc=%d, attempt=%s",
+              rc, std::to_string(g_attemptCount).c_str());
     WT_LOG_ERROR(buf);
     return rc;
 }
@@ -495,16 +437,16 @@ static void OnGetTop(lua_State* L)
     }
 
     int rc = TryRegister(L);
-    if (rc == 0 || rc == 6)
+    if (rc == 0)
     {
         g_globalL = L;
         InterlockedExchange(&g_registerDone, 1);
         int depthAfter = ((fn_lua_gettop)g_pTrampoline)(L); // GS 同款栈恢复验证
-        char buf[128];
+        char buf[160];
         _snprintf(buf, sizeof(buf),
-                  "WoWTranslate_* registered (L=0x%08X path=%s depthBefore=%d depthAfter=%d) verify=OK",
-                  (unsigned)(uintptr_t)L, rc == 0 ? "A:raw-gt" : "B:__index-t2",
-                  depth, depthAfter);
+                  "WoWTranslate_* registered (L=0x%08X path=A:raw-gt depthBefore=%d depthAfter=%d "
+                  "readback_tt=%d informational) verify=OK",
+                  (unsigned)(uintptr_t)L, depth, depthAfter, (int)g_ttA_ver);
         WT_LOG_INFO(buf);
     }
 }
