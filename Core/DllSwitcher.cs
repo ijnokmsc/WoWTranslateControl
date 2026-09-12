@@ -112,7 +112,7 @@ public sealed class DllSwitcher
             $"  \"displayMode\": \"{displayMode}\",\n" +
             $"  \"displayPrefix\": \"{EscapeJson(displayPrefix ?? "[译]")}\",\n" +
             $"  \"outgoingMode\": \"{outgoingMode}\",\n" +
-            $"  \"log\": true\n" +
+            $"  \"log\": false\n" +
             "}\n";
         var path = Path.Combine(gameDir, "WoWTranslateDirect.json");
         File.WriteAllText(path, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));

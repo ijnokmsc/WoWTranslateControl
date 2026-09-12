@@ -519,7 +519,7 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
   end
 end)
 
-DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r Direct driver v24 loaded (mode=" ..
+DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 2.1.1 by ijnokmsc loaded (mode=" ..
   displayMode .. (displayMode == "both" and (", prefix=" .. dispPrefix) or "") ..
   ", outgoing=" .. outgoingMode .. ")")
 

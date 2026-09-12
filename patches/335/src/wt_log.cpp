@@ -6,7 +6,7 @@ namespace wt {
 
 static CRITICAL_SECTION g_logCs;
 static bool g_logReady = false;
-static volatile LONG g_logEnabled = 1;   // 配置 "log": false 可关闭（wtSetLogEnabled）
+static volatile LONG g_logEnabled = 0;   // 默认关闭；配置 "log": true 开启（wtSetLogEnabled）
 static HANDLE g_logFile = NULL;
 static HMODULE g_hSelf = NULL; // 引擎 DLL 自身模块句柄（DllMain 传入）
 
