@@ -250,6 +250,8 @@ static RegEntry g_regs[] = {
 // 防御：每对操作后校验栈深恢复，不匹配立即止损（最多泄漏一对，不伤 Lua 状态）。
 // 注册完成后自检：getfield(_G, "WoWTranslate_Version") 取回 tt 必须是 function(6)。
 // 返回：0=注册+自检 OK，1=SEH，2=栈深不匹配，3=自检失败（写进去了但取不回）
+static volatile LONG g_selfcheckTT = -1;   // rc=3 时记录自检实际读到的 TValue.tt
+
 static int TryRegisterCore(lua_State* L)
 {
     int depth0 = ((fn_lua_gettop)g_pTrampoline)(L);
@@ -267,12 +269,18 @@ static int TryRegisterCore(lua_State* L)
         }
 
         // ---- 注册自检：从 _G 取回函数验明类型 ----
+        // ⚠ Lua 5.1 闭包是可回收对象：Closure 存进表后的真实 tt = LUA_TFUNCTION|0x40 = 0x46，
+        //   不是裸值 6。v10 用 tt!=6 判定导致「已写成功但自检恒败」rc=3×64（11:53 日志实锤：
+        //   每对栈深净 0 = push/settable 全部正常，唯 tt 判定错误）。GS 无自检故无此坑。
         p_getfield(L, LUA_GLOBALSINDEX, "WoWTranslate_Version");
         DWORD top   = *(DWORD*)((BYTE*)L + 0xC);          // L->top（getfield 后已 +0x10）
         int   tt    = *(int*)(top - 0x10 + 8);            // TValue.tt @ +8（3.3.5 布局）
         p_settop(L, -2);                                  // 弹回自检值
-        if (tt != 6)                                      // LUA_TFUNCTION
+        if ((tt & 0x1F) != 6)                             // LUA_TFUNCTION（兼容 6 / 0x46）
+        {
+            g_selfcheckTT = tt;                           // __try 内禁 std::string，tt 带出去打
             return 3;
+        }
 
         return 0;
     }
@@ -288,8 +296,12 @@ WT_NOINLINE static int TryRegister(lua_State* L)
     if (rc == 0)
         return 0;
     char buf[96];
-    _snprintf(buf, sizeof(buf), "register failed rc=%d, attempt=%s",
-              rc, std::to_string(g_attemptCount).c_str());
+    if (rc == 3)
+        _snprintf(buf, sizeof(buf), "register failed rc=3 selfcheck tt=0x%02X (expect 6 or 0x46), attempt=%s",
+                  (unsigned)g_selfcheckTT, std::to_string(g_attemptCount).c_str());
+    else
+        _snprintf(buf, sizeof(buf), "register failed rc=%d, attempt=%s",
+                  rc, std::to_string(g_attemptCount).c_str());
     WT_LOG_ERROR(buf);
     return rc;
 }
