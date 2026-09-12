@@ -100,7 +100,7 @@ local outPending, outCounter = {}, 0
 local origSend = nil
 
 -- v19 诊断旗标（各只回报一次，进 DLL 日志定位链路断点）
-local dbgHooked, dbgCapture, dbgCjk = false, false, false
+local dbgHooked, dbgCapture, dbgCjk = false, false, 0   -- dbgCjk 是计数器（false 无法比较）
 local dbgQueueErr, dbgTransOk, dbgTransErr, dbgTimeout, dbgDisplayed = false, false, false, false, false
 local dbgOutOk, dbgOutErr, dbgOutSkip = false, false, false
 
@@ -259,62 +259,74 @@ R"WTCDRIVER(
 -- ⚠ 必须定义在 HandleIncoming 之前：local 函数定义顺序=可见性（v22 曾因放后面
 --   在 HandleIncoming 里落空成全局 nil，游戏内报 attempt to call global）。
 local function StripChatPrefixBody(text)
-  if not text then return "" end
-  local t = text
+  if not text then return "", "" end
+  -- 全角冒号归一化：zhCN 聊天格式用 ：，统一成 : 后所有模式可复用
+  local w = string.gsub(text, "：" , ":")
   local hadChannel = false
   local nameConsumed = false
-  t = string.gsub(t, "^%s+", "")
-  t = string.gsub(t, "^|c%x%x%x%x%x%x%x%x", "")
-  t = string.gsub(t, "^%s+", "")
-  local t2 = string.gsub(t, "^|Hchannel:[^|]-|h.-|h", "")
-  if t2 ~= t then
-    t = t2
+  w = string.gsub(w, "^%s+", "")
+  w = string.gsub(w, "^|c%x%x%x%x%x%x%x%x", "")
+  w = string.gsub(w, "^%s+", "")
+  -- 频道头：超链接形态（自定义频道）或 纯文本 [频道名] 形态（本地防御/寻求组队等系统频道）
+  local t2 = string.gsub(w, "^|Hchannel:[^|]-|h.-|h", "")
+  if t2 ~= w then
+    w = t2
     hadChannel = true
   else
-    t2 = string.gsub(t, "^%[[^%]]-%]%s+%[[^%]]-%]%s*:%s*", "")
-    if t2 ~= t then
-      t = t2
+    t2 = string.gsub(w, "^%[[^%]]-%]%s+%[[^%]]-%]%s*:%s*", "")
+    if t2 ~= w then
+      w = t2
       hadChannel = true
       nameConsumed = true
     else
-      t2 = string.gsub(t, "^%[[^%]]-%]%s+[%w_%-]+%s*:%s*", "")
-      if t2 ~= t then
-        t = t2
+      t2 = string.gsub(w, "^%[[^%]]-%]%s+[%w_%-]+%s*:%s*", "")
+      if t2 ~= w then
+        w = t2
         hadChannel = true
         nameConsumed = true
       end
     end
   end
-  t = string.gsub(t, "^%s+", "")
-  t = string.gsub(t, "^|c%x%x%x%x%x%x%x%x", "")
-  t = string.gsub(t, "^|r", "")
-  local t3 = string.gsub(t, "^|Hplayer:[^|]-|h.-|h", "")
-  if t3 ~= t then
-    t = t3
+  w = string.gsub(w, "^%s+", "")
+  w = string.gsub(w, "^|c%x%x%x%x%x%x%x%x", "")
+  w = string.gsub(w, "^|r", "")
+  -- 发送者：超链接形态 或 [名字]: 形态
+  local t3 = string.gsub(w, "^|Hplayer:[^|]-|h.-|h", "")
+  if t3 ~= w then
+    w = t3
     nameConsumed = true
   else
-    t3 = string.gsub(t, "^%[[^%]]-%]%s*:%s*", "")
-    if t3 ~= t then
-      t = t3
+    t3 = string.gsub(w, "^%[[^%]]-%]%s*:%s*", "")
+    if t3 ~= w then
+      w = t3
       nameConsumed = true
     else
-      t3 = string.gsub(t, "^%[[^%]]-%]|r%s*:%s*", "")
-      if t3 ~= t then
-        t = t3
+      t3 = string.gsub(w, "^%[[^%]]-%]|r%s*:%s*", "")
+      if t3 ~= w then
+        w = t3
         nameConsumed = true
       end
     end
   end
-  t = string.gsub(t, "^|r", "")
-  t = string.gsub(t, "^%s*:%s*", "")
-  -- 本客户端聊天用全角冒号 ：（UTF-8 \239\188\154；Lua 5.1 无 \xNN 转义，用十进制）
-  t = string.gsub(t, "^\239\188\154", "")
-  t = string.gsub(t, "^%s+", "")
+  w = string.gsub(w, "^|r", "")
+  w = string.gsub(w, "^%s*:%s*", "")
   if hadChannel and not nameConsumed then
-    t = string.gsub(t, "^[%w_%-]+%s*:%s*", "")
+    w = string.gsub(w, "^[%w_%-]+%s*:%s*", "")
   end
-  t = string.gsub(t, "^%s+", "")
-  return t
+  -- zhCN 动词前缀（"说：/大喊：/密语："…）：名字剥掉后残留的纯中文短前缀+冒号。
+  -- 限定"纯中文且 <=12 字节"——含 ASCII 的正文（如 hello:world）绝不误伤
+  if nameConsumed then
+    local frag = string.match(w, "^(.-):")
+    if frag and #frag <= 12 and frag ~= "" and not string.find(frag, "[a-zA-Z0-9]") then
+      w = string.sub(w, #frag + 2)
+      w = string.gsub(w, "^%s+", "")
+    end
+  end
+  w = string.gsub(w, "^%s+", "")
+  -- body 是 w 的后缀：prefix 从 w 头部取（归一化后的头，显示时 ： 变 : 属可接受差异）
+  local body = w
+  local prefix = string.sub(w, 1, #w - #body)
+  return body, prefix
 end
 
 local function Passthrough(frame, orig, text, r, g, b, id, hold)
@@ -334,15 +346,15 @@ local function HandleIncoming(frame, orig, text, r, g, b, id, hold)
     end
   end
   -- 先剥 [频道] [玩家]: 头，正文才做语言判断与翻译（头里的中文频道名不该触发跳过）
-  local body = StripChatPrefixBody(text)
+  local body, prefix = StripChatPrefixBody(text)
   if body == "" then
     return Passthrough(frame, orig, text, r, g, b, id, hold)
   end
   -- 正文已含中文或纯符号/数字 → 不送翻（首次记 diag 证明捕获链路是通的）
   if HasCJK(body) or not HasLatin(body) then
-    if not dbgCjk and HasCJK(body) then
-      dbgCjk = true
-      WoWTranslate_Diag("WTC_SKIP_CJK ch=" .. tostring(curChannel) .. " body=" .. string.sub(body, 1, 60))
+    if dbgCjk < 3 then
+      dbgCjk = dbgCjk + 1
+      WoWTranslate_Diag("WTC_SKIP_CJK ch=" .. tostring(curChannel) .. " body=" .. string.sub(body, 1, 80))
     end
     return Passthrough(frame, orig, text, r, g, b, id, hold)
   end
@@ -363,13 +375,12 @@ local function HandleIncoming(frame, orig, text, r, g, b, id, hold)
   local mid = tostring(counter)
   local both = (displayMode == "both")
   pending[mid] = { frame = frame, orig = orig, text = text, segs = segs,
-                   prefix = string.sub(text, 1, #text - #body),
+                   prefix = prefix,
                    r = r, g = g, b = b, id = id, hold = hold,
                    t = GetTime(), done = both }
   local ok = pcall(function()
     local r = WoWTranslate_Translate("\1" .. curChannel .. "\1" .. toSend, "en", "zh", mid)
-    if r ~= "ok" and not dbgQueueErr then
-      dbgQueueErr = true
+    if r ~= "ok" then
       WoWTranslate_Diag("WTC_QUEUERR " .. tostring(r))
     end
   end)
@@ -478,10 +489,7 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
       p.done = true
       pending[id] = nil
       if er ~= "" then
-        if not dbgTransErr then
-          dbgTransErr = true
-          WoWTranslate_Diag("WTC_TRANSERR id=" .. id .. " err=" .. string.sub(er, 1, 80))
-        end
+        WoWTranslate_Diag("WTC_TRANSERR id=" .. id .. " err=" .. string.sub(er, 1, 80))
         if displayMode ~= "both" then
           p.orig(p.frame, p.text, p.r, p.g, p.b, p.id, p.hold)
         end
@@ -509,10 +517,7 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
     if now - p.t > 30 then
       pending[mid] = nil
       if not p.done then
-        if not dbgTimeout then
-          dbgTimeout = true
-          WoWTranslate_Diag("WTC_TIMEOUT id=" .. mid .. " (translation never returned)")
-        end
+        WoWTranslate_Diag("WTC_TIMEOUT id=" .. mid .. " (translation never returned)")
         p.orig(p.frame, p.text, p.r, p.g, p.b, p.id, p.hold)
       end
     end

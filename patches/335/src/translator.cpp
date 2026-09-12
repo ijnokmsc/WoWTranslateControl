@@ -349,6 +349,23 @@ void Translator::WorkerLoop()
                 {
                     std::string error;
                     std::string tr = TranslateOne(job, error);
+                    if (!error.empty())
+                    {
+                        // 瞬态失败（网络抖动/上游瞬时故障）单次重试，重试仍败才回传错误
+                        Sleep(400);
+                        std::string error2;
+                        std::string tr2 = TranslateOne(job, error2);
+                        WT_LOG_WARN("translate retry: " + (error2.empty() ? "succeeded" : "failed again: " + error2));
+                        if (error2.empty())
+                        {
+                            tr = tr2;
+                            error.clear();
+                        }
+                        else
+                        {
+                            error = error2;
+                        }
+                    }
                     if (error.empty())
                     {
                         r.translation = tr;

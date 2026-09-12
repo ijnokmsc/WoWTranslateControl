@@ -329,15 +329,29 @@ public partial class MainWindow : Window
     {
         ReadConfigFromUi();
 
-        if (LlamaServerManager.IsPortListening(_cfg.ListenPort))
+        // 端口占用自动回退：从配置端口向上探测（最多 20 个，避开 llama 上游端口）。
+        // 新端口写回 settings 并同步游戏目录 WoWTranslateDirect.json——DLL 端点跟着变。
+        var originalPort = _cfg.ListenPort;
+        if (LlamaServerManager.IsPortListening(originalPort))
         {
-            var msg = $"端口 {_cfg.ListenPort} 已被占用。\n\n" +
-                      "很可能是旧的 llama_throttle_proxy.py 还在运行。\n" +
-                      "请先关闭它（或结束对应 python 进程）再启动本代理，" +
-                      "否则插件的请求不会经过过滤。";
-            Log(msg.Replace("\n", " "));
-            MessageBox.Show(this, msg, "端口冲突", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
+            var port = originalPort;
+            for (var i = 0; i < 20 && LlamaServerManager.IsPortListening(port); i++)
+            {
+                port++;
+                if (port == _cfg.UpstreamPort) port++;   // 避开 llama-server
+            }
+            if (LlamaServerManager.IsPortListening(port))
+            {
+                var msg = "端口 " + originalPort + " 起连续 20 个端口均被占用，无法启动过滤代理。" +
+                          "请检查是否有其他程序占用，或手动在设置里指定端口。";
+                Log(msg);
+                MessageBox.Show(this, msg, "端口冲突", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            _cfg.ListenPort = port;
+            _cfg.Save();
+            TxtListenPort.Text = port.ToString();
+            Log("端口 " + originalPort + " 已被占用（可能是其他代理/旧实例），已自动切换到 " + port + " 并保存。");
         }
 
         _glossary ??= Core.Glossary.GlossaryStore.Load(
@@ -361,6 +375,23 @@ public partial class MainWindow : Window
             BtnStartProxy.IsEnabled = false;
             BtnStopProxy.IsEnabled = true;
             UpdateProxyDot(true);
+            ProxyPortText.Text = $" :{_cfg.ListenPort} → :{_cfg.UpstreamPort}";
+            // 端口回退后同步游戏目录 WoWTranslateDirect.json（DLL 端点端口 = 新监听端口）
+            if (originalPort != _cfg.ListenPort)
+            {
+                try
+                {
+                    var gd = TxtGameDir.Text.Trim();
+                    if (_lastDllStatus?.Current == Core.DllSwitcher.TrackDirect &&
+                        Directory.Exists(gd) && File.Exists(Path.Combine(gd, "Wow.exe")))
+                    {
+                        Core.DllSwitcher.WriteDirectConfig(gd, _cfg.ListenPort,
+                            _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix, _cfg.DirectOutgoingMode);
+                        Log("已同步游戏目录 WoWTranslateDirect.json——游戏内 /reload 或重启游戏生效");
+                    }
+                }
+                catch (Exception ex) { Log("同步游戏目录配置失败：" + ex.Message); }
+            }
         }
         catch (Exception ex)
         {
