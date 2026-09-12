@@ -878,12 +878,16 @@ public partial class MainWindow : Window
 
     // ==================== DLL 轨道切换（ADR-007） ====================
 
+    private Core.DllSwitcher.SwitchStatus? _lastDllStatus;
+
     private void CmbDllTrack_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
         if (!IsLoaded) return;
         _cfg.PluginTrack = CmbDllTrack.SelectedItem is System.Windows.Controls.ComboBoxItem item
             ? (string)item.Tag : "gs";
         _cfg.Save();
+        // 用户手动改选目标轨道时，必须重算切换按钮的可用状态
+        UpdateSwitchButton();
     }
 
     private void BtnRefreshDll_Click(object sender, RoutedEventArgs e) => RefreshDllStatus();
@@ -896,20 +900,33 @@ public partial class MainWindow : Window
         try
         {
             var status = Core.DllSwitcher.Probe(gameDir, assets);
+            _lastDllStatus = status;
             TxtDllStatus.Text = $"当前：{status.CurrentText}\n" + string.Join("\n", status.Details);
 
-            // 选中当前轨道；direct 资产未就绪时禁用切换按钮
+            // 刷新语义 = 显示当前实际轨道（会触发 SelectionChanged，幂等无害）
             foreach (System.Windows.Controls.ComboBoxItem item in CmbDllTrack.Items)
                 if ((string)item.Tag == status.Current) { CmbDllTrack.SelectedItem = item; break; }
 
-            var target = CmbDllTrack.SelectedItem is System.Windows.Controls.ComboBoxItem sel
-                ? (string)sel.Tag : "gs";
-            BtnSwitchDll.IsEnabled = status.Current != target &&
-                !(target == Core.DllSwitcher.TrackDirect && !status.DirectAssetsReady);
+            UpdateSwitchButton();
         }
         catch (Exception ex)
         {
             TxtDllStatus.Text = $"检测失败：{ex.Message}";
+        }
+    }
+
+    /// <summary>按「当前轨道 vs 下拉框选中的目标轨道 + 资产就绪」重算切换按钮。</summary>
+    private void UpdateSwitchButton()
+    {
+        if (BtnSwitchDll == null || _lastDllStatus == null) return;
+        var target = CmbDllTrack.SelectedItem is System.Windows.Controls.ComboBoxItem sel
+            ? (string)sel.Tag : "gs";
+        BtnSwitchDll.IsEnabled = _lastDllStatus.Current != target &&
+            !(target == Core.DllSwitcher.TrackDirect && !_lastDllStatus.DirectAssetsReady);
+        // 资产未就绪时给出明确提示，避免「灰但不知道为什么」
+        if (target == Core.DllSwitcher.TrackDirect && !_lastDllStatus.DirectAssetsReady)
+        {
+            TxtDllStatus.Text += $"\n⚠ Track B 不可选：未在 {_lastDllStatus.DirectAssetsDir} 或游戏目录 wtc_direct_dll 找到 dinput8.dll + WoWTranslateDirect.dll";
         }
     }
 
