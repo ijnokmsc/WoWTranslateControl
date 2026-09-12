@@ -915,6 +915,7 @@ public partial class MainWindow : Window
                 if ((string)item.Tag == status.Current) { CmbDllTrack.SelectedItem = item; break; }
 
             UpdateSwitchButton();
+            UpdateDirectConfigHint();
         }
         catch (Exception ex)
         {
@@ -975,12 +976,50 @@ public partial class MainWindow : Window
             {
                 Core.DllSwitcher.WriteDirectConfig(gameDir, _cfg.ListenPort,
                     _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix, _cfg.DirectOutgoingMode);
-                Log($"已更新游戏目录 WoWTranslateDirect.json（displayMode={_cfg.DirectDisplayMode}，outgoing={_cfg.DirectOutgoingMode}，重登生效）");
+                Log($"已更新游戏目录 WoWTranslateDirect.json（displayMode={_cfg.DirectDisplayMode}，outgoing={_cfg.DirectOutgoingMode}，游戏内 /reload 生效）");
             }
         }
         catch (Exception ex)
         {
             Log("同步 Track B 显示配置失败：" + ex.Message);
+        }
+        UpdateDirectConfigHint();
+    }
+
+    /// <summary>
+    /// DLL 轨道卡的状态标记：对比界面配置与游戏目录 WoWTranslateDirect.json，
+    /// 未同步/未部署/损坏时给出 ⚠ 提示。
+    /// </summary>
+    private void UpdateDirectConfigHint()
+    {
+        if (TxtDirectDisplayHint == null) return;
+        try
+        {
+            if (_lastDllStatus?.Current != Core.DllSwitcher.TrackDirect)
+            {
+                TxtDirectDisplayHint.Text = "Track B 未启用；切到 Track B 或修改上方设置时会自动写入游戏目录配置。";
+                return;
+            }
+            var jsonPath = Path.Combine(TxtGameDir.Text.Trim(), "WoWTranslateDirect.json");
+            if (!File.Exists(jsonPath))
+            {
+                TxtDirectDisplayHint.Text = "⚠ 游戏目录还没有 WoWTranslateDirect.json，修改任一设置即可自动写入；游戏内 /reload 或重启客户端生效。";
+                return;
+            }
+            using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(jsonPath));
+            string Get(string key) =>
+                doc.RootElement.TryGetProperty(key, out var v) &&
+                v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() ?? "" : "";
+            var synced = Get("displayMode") == _cfg.DirectDisplayMode &&
+                         Get("displayPrefix") == _cfg.DirectDisplayPrefix &&
+                         Get("outgoingMode") == _cfg.DirectOutgoingMode;
+            TxtDirectDisplayHint.Text = synced
+                ? "✔ 已与游戏目录配置同步；游戏内 /reload 或重启客户端生效。"
+                : "⚠ 界面配置与游戏目录不一致，改动任一设置即可自动写入；游戏内 /reload 或重启客户端生效。";
+        }
+        catch
+        {
+            TxtDirectDisplayHint.Text = "⚠ 游戏目录 WoWTranslateDirect.json 读取失败（可能已损坏），改动任一设置即可重写。";
         }
     }
 

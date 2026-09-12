@@ -428,7 +428,59 @@ static std::string g_displayMode   = "replace";   // "replace" | "both"
 static std::string g_displayPrefix = "[译]";      // UTF-8（客户端为 UTF-8 通道）
 static std::string g_outgoingMode  = "off";       // "off" | "replace" | "both"
 
-static std::string g_driverChunk;                 // 配置前缀 + 驱动 Lua，InitThread 组装
+static std::string g_driverChunk;                 // 配置前缀 + 驱动 Lua，RebuildDriverChunk 组装
+static HMODULE g_hSelfModule = NULL;              // 引擎自身句柄（DllMain 传入；日志/配置路径用）
+
+static void ApplyDisplayKeys(const json& disp)
+{
+    if (disp.contains("displayMode") && disp["displayMode"].is_string())
+        g_displayMode = disp["displayMode"].get<std::string>();
+    if (disp.contains("displayPrefix") && disp["displayPrefix"].is_string())
+        g_displayPrefix = disp["displayPrefix"].get<std::string>();
+    if (g_displayMode != "replace" && g_displayMode != "both")
+        g_displayMode = "replace";
+    if (disp.contains("outgoingMode") && disp["outgoingMode"].is_string())
+        g_outgoingMode = disp["outgoingMode"].get<std::string>();
+    if (g_outgoingMode != "off" && g_outgoingMode != "replace" && g_outgoingMode != "both")
+        g_outgoingMode = "off";
+}
+
+static void RebuildDriverChunk()
+{
+    g_driverChunk = std::string("WTC={displayMode='") + wt::LuaEscape(g_displayMode) +
+                    "',prefix='" + wt::LuaEscape(g_displayPrefix) +
+                    "',outgoing='" + wt::LuaEscape(g_outgoingMode) + "'}\n" +
+                    wt::DriverLuaCode();
+}
+
+// /reload 时重读 WoWTranslateDirect.json 刷新显示/外发配置并重组驱动块——
+// 用户在控制台改配置后打 /reload 即生效，无需重启客户端（v25）。
+static void RefreshDriverConfig()
+{
+    char path[MAX_PATH];
+    if (!g_hSelfModule || !GetModuleFileNameA(g_hSelfModule, path, MAX_PATH)) return;
+    char* slash = strrchr(path, '\\');
+    if (slash) *slash = 0;
+    std::string cfgPath = std::string(path) + "\\WoWTranslateDirect.json";
+    HANDLE h = CreateFileA(cfgPath.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                           NULL, OPEN_EXISTING, 0, NULL);
+    if (h == INVALID_HANDLE_VALUE) return;
+    char buf[4096] = { 0 };
+    DWORD rd = 0;
+    ReadFile(h, buf, sizeof(buf) - 1, &rd, NULL);
+    CloseHandle(h);
+    if (rd == 0) return;
+    try
+    {
+        json disp = json::parse(std::string(buf, rd));
+        ApplyDisplayKeys(disp);
+        RebuildDriverChunk();
+        WT_LOG_INFO("config reloaded on /reload: mode=" + g_displayMode +
+                    " outgoing=" + g_outgoingMode);
+    }
+    catch (...) { /* json 损坏时沿用当前配置 */ }
+}
+
 static volatile LONG g_driverDone = 0;            // 注入成功（或放弃）后置 1
 static volatile LONG g_driverBusy = 0;            // 重入保护（FrameScript_Execute 内部会再触发 gettop）
 static volatile LONG g_driverAttempts = 0;        // 重试计数
@@ -547,9 +599,10 @@ static void OnGetTop(lua_State* L)
         char buf[80];
         _snprintf(buf, sizeof(buf), "global L switched: 0x%08X", (unsigned)(uintptr_t)cur);
         WT_LOG_INFO(buf);
-        // /reload → 新 Lua 状态（旧驱动的 hook/帧随旧状态销毁）→ 重注驱动
+        // /reload → 新 Lua 状态（旧驱动的 hook/帧随旧状态销毁）→ 重读配置 + 重注驱动
         InterlockedExchange(&g_driverDone, 0);
         InterlockedExchange(&g_driverAttempts, 0);
+        RefreshDriverConfig();
     }
 
     // 调原函数（trampoline）拿真实栈深：top - base
@@ -689,7 +742,6 @@ static bool VerifyAddresses()
     return true;
 }
 
-static HMODULE g_hSelfModule = NULL;
 
 // 自动配置（v14）：优先读 DLL 同目录 WoWTranslateDirect.json；否则默认指向控制台伪装
 // OpenAI 端点（架构定案：Track B 引擎 → 127.0.0.1:8080 → 控制台管线）。
@@ -718,16 +770,7 @@ static void AutoConfigure()
                 try
                 {
                     json disp = json::parse(std::string(buf, rd));
-                    if (disp.contains("displayMode") && disp["displayMode"].is_string())
-                        g_displayMode = disp["displayMode"].get<std::string>();
-                    if (disp.contains("displayPrefix") && disp["displayPrefix"].is_string())
-                        g_displayPrefix = disp["displayPrefix"].get<std::string>();
-                    if (g_displayMode != "replace" && g_displayMode != "both")
-                        g_displayMode = "replace";
-                    if (disp.contains("outgoingMode") && disp["outgoingMode"].is_string())
-                        g_outgoingMode = disp["outgoingMode"].get<std::string>();
-                    if (g_outgoingMode != "off" && g_outgoingMode != "replace" && g_outgoingMode != "both")
-                        g_outgoingMode = "off";
+                    ApplyDisplayKeys(disp);
                     WT_LOG_INFO("display config: mode=" + g_displayMode +
                                 " outgoing=" + g_outgoingMode);
                 }
@@ -782,10 +825,7 @@ static DWORD WINAPI InitThread(LPVOID)
     p_Execute      = (fn_FrameScript_Execute)0x819210;  // 主线程专用（TryInjectDriver）
 
     // v16 驱动块：配置前缀（WTC 全局表）+ 驱动 Lua，注册成功后主线程注入
-    g_driverChunk = std::string("WTC={displayMode='") + wt::LuaEscape(g_displayMode) +
-                    "',prefix='" + wt::LuaEscape(g_displayPrefix) +
-                    "',outgoing='" + wt::LuaEscape(g_outgoingMode) + "'}\n" +
-                    wt::DriverLuaCode();
+    RebuildDriverChunk();
 
     // 保存 gettop 原 6 字节（gettop 签名前 6 字节，指令边界：push ebp / mov ebp,esp / mov ecx,[ebp+8]）
     g_hookTarget = (BYTE*)0x84DBD0;

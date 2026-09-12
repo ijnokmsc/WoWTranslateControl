@@ -113,7 +113,7 @@ internal static class Program
         Expect(w, errors, "TxtGameDir", "BtnConfigurePlugin", "BtnWizard", "TxtPluginReport");
         // DLL 轨道切换卡（ADR-007）+ 托盘开关 + Track B 显示模式（v16 全自治驱动）
         Expect(w, errors, "CmbDllTrack", "BtnSwitchDll", "BtnRefreshDll", "TxtDllStatus", "ChkTray",
-            "CmbDirectDisplay", "TxtDirectPrefix");
+            "CmbDirectDisplay", "TxtDirectPrefix", "CmbDirectOutgoing");
         var dispMode = FindByName<System.Windows.Controls.ComboBox>(w, "CmbDirectDisplay");
         if (dispMode != null && dispMode.Items.Count != 2)
             errors.Add($"CmbDirectDisplay 应有 2 个显示模式项，实际 {dispMode.Items.Count}");
