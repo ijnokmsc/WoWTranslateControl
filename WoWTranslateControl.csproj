@@ -25,6 +25,11 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>assets\app.ico</Link>
     </None>
+    <!-- 更新日志随发布自动输出（发版前先更新本文件） -->
+    <None Include="更新日志.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>更新日志.txt</Link>
+    </None>
     <!-- Track B Direct DLL 资产随构建/发布自动输出到输出目录 assets\direct-dll（DllSwitcher 按 BaseDirectory 探测） -->
     <None Include="assets\direct-dll\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
