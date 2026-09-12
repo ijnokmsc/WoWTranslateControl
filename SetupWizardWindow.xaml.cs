@@ -81,6 +81,7 @@ public partial class SetupWizardWindow : Window
                     _builds = ModelAdvisor.OrderBuilds(builds, _recommendation!);
                     CmbBuild.ItemsSource = _builds;
                     CmbBuild.SelectedIndex = 0;
+                ReportLlamaDirUsage();
                 }
                 return;
             }
@@ -137,6 +138,9 @@ public partial class SetupWizardWindow : Window
                 zipPath, LlamaDir, overwriteFiles: true)).GetAwaiter().GetResult();
             TxtStatus.Text = "llama.cpp 构建已解压完成";
             Log($"解压完成：{LlamaDir}\\llama-server.exe 应已就绪，返回主窗口即可启动 llama-server");
+            try { System.IO.File.Delete(zipPath); } catch { }
+            TxtStatus.Text = "llama.cpp 构建已解压完成（安装包已删除以释放空间）";
+            ReportLlamaDirUsage();
         }
         catch (Exception ex)
         {
@@ -163,6 +167,7 @@ public partial class SetupWizardWindow : Window
             BtnApplyModel.IsEnabled = true;
             TxtStatus.Text = "模型下载完成，可点「应用此模型」写入配置";
             Log("模型下载完成");
+            ReportLlamaDirUsage();
         }).ConfigureAwait(false);
     }
 
@@ -227,6 +232,90 @@ public partial class SetupWizardWindow : Window
         _cts.Cancel();
         Log("正在停止下载…");
         BtnCancelDownload.IsEnabled = false;
+    }
+
+    // ==================== llama 目录大文件检测 / 清理 ====================
+
+    private sealed record LargeFile(string Name, long Size, string Kind, bool Reclaimable);
+
+    /// <summary>扫描 llama 目录中 >50MB 的文件并分类：程序 / 使用中模型 / 冗余项。</summary>
+    private System.Collections.Generic.List<LargeFile> ScanLlamaDir()
+    {
+        var list = new System.Collections.Generic.List<LargeFile>();
+        try
+        {
+            var dir = new DirectoryInfo(LlamaDir);
+            if (!dir.Exists) return list;
+            foreach (var f in dir.GetFiles())
+            {
+                if (f.Length < 50L * 1024 * 1024) continue;
+                string kind;
+                var reclaimable = false;
+                if (string.Equals(f.Name, "llama-server.exe", StringComparison.OrdinalIgnoreCase))
+                    kind = "程序";
+                else if (string.Equals(f.Name, _cfg.ModelFile, StringComparison.OrdinalIgnoreCase))
+                    kind = "使用中模型";
+                else if (f.Name.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
+                { kind = "未使用模型"; reclaimable = true; }
+                else if (f.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                { kind = "遗留安装包"; reclaimable = true; }
+                else if (f.Name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+                { kind = "残留临时文件"; reclaimable = true; }
+                else kind = "其他大文件";
+                list.Add(new LargeFile(f.Name, f.Length, kind, reclaimable));
+            }
+        }
+        catch { }
+        return list;
+    }
+
+    private void ReportLlamaDirUsage()
+    {
+        var items = ScanLlamaDir();
+        if (items.Count == 0) return;
+        Log("llama 目录大文件检测（>50MB）：");
+        foreach (var it in items)
+            Log($"  [{it.Kind}] {it.Name}  {it.Size / 1048576.0:F0} MB" +
+                (it.Reclaimable ? "  ← 冗余，可清理" : ""));
+        var reclaim = items.Where(i => i.Reclaimable).Sum(i => i.Size);
+        if (reclaim > 0)
+            Log($"  共 {reclaim / 1048576.0:F0} MB 可释放：点「清理未使用大文件」按钮处理");
+    }
+
+    private void BtnCleanLlamaDir_Click(object sender, RoutedEventArgs e)
+    {
+        var targets = ScanLlamaDir().Where(i => i.Reclaimable).ToList();
+        if (targets.Count == 0)
+        {
+            Log("llama 目录没有可清理的冗余大文件");
+            TxtStatus.Text = "没有可清理的冗余大文件";
+            return;
+        }
+        var bs = Convert.ToChar(92);
+        var msg = "将删除以下文件（使用中的模型和 llama-server.exe 不会被动）:" + bs.ToString() + "n" + bs.ToString() + "n" +
+                  string.Join(bs.ToString() + "n", targets.Select(t => $"[{t.Kind}] {t.Name}  {t.Size / 1048576.0:F0} MB")) +
+                  bs + 'n' + bs + $"共可释放 {targets.Sum(t => t.Size) / 1048576.0:F0} MB。确认删除？";
+        if (MessageBox.Show(msg, "清理确认", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+        var freed = 0L;
+        var failed = 0;
+        foreach (var t in targets)
+        {
+            try
+            {
+                System.IO.File.Delete(Path.Combine(LlamaDir, t.Name));
+                freed += t.Size;
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                Log($"删除失败 [{t.Name}]：{ex.Message}（文件可能被占用）");
+            }
+        }
+        Log($"清理完成：删除 {targets.Count - failed} 个文件，释放 {freed / 1048576.0:F0} MB" +
+            (failed > 0 ? $"；{failed} 个删除失败（详见日志）" : ""));
+        TxtStatus.Text = $"清理完成，释放 {freed / 1048576.0:F0} MB";
+        ReportLlamaDirUsage();
     }
 
     private void SetBusy(bool busy)

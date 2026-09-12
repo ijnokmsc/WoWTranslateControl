@@ -47,7 +47,9 @@
                             Padding="10,4" Click="BtnRefreshBuilds_Click" />
                     <Button x:Name="BtnDownloadBuild" Content="下载到 llama 目录"
                             Style="{StaticResource PrimaryBtn}" Margin="8,0,0,0"
-                            Padding="10,4" Click="BtnDownloadBuild_Click" />                </StackPanel>
+                            Padding="10,4" Click="BtnDownloadBuild_Click" />
+                    <Button x:Name="BtnCleanLlamaDir" Content="清理未使用大文件"
+                            Margin="8,0,0,0" Padding="10,4" Click="BtnCleanLlamaDir_Click" />                </StackPanel>
                 <TextBlock x:Name="TxtBuildNote" Style="{StaticResource Dim}" Margin="0,6,0,0"
                            TextWrapping="Wrap"
                            Text="列表来自 GitHub 最新 Release。CUDA 版需同时下载 cudart 运行库并解压到同一目录。" />
