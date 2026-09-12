@@ -182,6 +182,16 @@ public sealed class AppConfig
     /// <summary>当前偏好轨道："gs" = Track A 现役 GS 插件；"direct" = Track B 自有 Direct DLL（实验）。</summary>
     public string PluginTrack { get; set; } = "gs";
 
+    // ---------- Track B Direct DLL 显示（v16 全自治驱动） ----------
+    /// <summary>
+    /// Track B 驱动 Lua 的译文显示模式："replace" = 译文替换原文（失败/超时回显原文）；
+    /// "both" = 原文照常显示，译文加前缀另起一行。随 WoWTranslateDirect.json 写入游戏目录，重登生效。
+    /// </summary>
+    public string DirectDisplayMode { get; set; } = "replace";
+
+    /// <summary>Track B both 模式的译文行前缀。</summary>
+    public string DirectDisplayPrefix { get; set; } = "[译]";
+
     // ---------- 过滤规则说明（只读，供界面展示） ----------
     [JsonIgnore]
     public static readonly (string Key, string Name, string Detail)[] RuleCatalog =

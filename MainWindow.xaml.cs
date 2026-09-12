@@ -213,6 +213,11 @@ public partial class MainWindow : Window
         foreach (System.Windows.Controls.ComboBoxItem item in CmbDllTrack.Items)
             if ((string)item.Tag == _cfg.PluginTrack) { CmbDllTrack.SelectedItem = item; break; }
 
+        // Track B 显示模式（v16 全自治驱动）
+        foreach (System.Windows.Controls.ComboBoxItem item in CmbDirectDisplay.Items)
+            if ((string)item.Tag == _cfg.DirectDisplayMode) { CmbDirectDisplay.SelectedItem = item; break; }
+        TxtDirectPrefix.Text = _cfg.DirectDisplayPrefix;
+
         _suppressSlider = true;
         SliderRatio.Value = _cfg.ChineseRatioLimit;
         _suppressSlider = false;
@@ -940,12 +945,58 @@ public partial class MainWindow : Window
         _cfg.Save();
 
         var assets = System.IO.Path.Combine(AppContext.BaseDirectory, "assets", "direct-dll");
-        var lines = Core.DllSwitcher.SwitchTo(gameDir, target, assets);
+        var lines = Core.DllSwitcher.SwitchTo(gameDir, target, assets,
+            listenPort: _cfg.ListenPort,
+            displayMode: _cfg.DirectDisplayMode,
+            displayPrefix: _cfg.DirectDisplayPrefix);
         TxtPluginReport.Text = string.Join("\n", lines);
         foreach (var line in lines) Log(line);
         MessageBox.Show(this, string.Join("\n", lines), "DLL 轨道切换",
             MessageBoxButton.OK,
             lines[^1].StartsWith("✅") ? MessageBoxImage.Information : MessageBoxImage.Warning);
         RefreshDllStatus();
+    }
+
+    // ==================== Track B 显示模式（v16 全自治驱动） ====================
+
+    /// <summary>当前实际轨道为 direct 时，把显示设置同步到游戏目录 WoWTranslateDirect.json。</summary>
+    private void SyncDirectConfigToGameDir()
+    {
+        if (!IsLoaded) return;
+        _cfg.Save();
+        try
+        {
+            var gameDir = TxtGameDir.Text.Trim();
+            if (_lastDllStatus?.Current == Core.DllSwitcher.TrackDirect &&
+                Directory.Exists(gameDir) && File.Exists(Path.Combine(gameDir, "Wow.exe")))
+            {
+                Core.DllSwitcher.WriteDirectConfig(gameDir, _cfg.ListenPort,
+                    _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix);
+                Log($"已更新游戏目录 WoWTranslateDirect.json（displayMode={_cfg.DirectDisplayMode}，重登生效）");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log("同步 Track B 显示配置失败：" + ex.Message);
+        }
+    }
+
+    private void CmbDirectDisplay_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded || CmbDirectDisplay.SelectedItem is not System.Windows.Controls.ComboBoxItem item) return;
+        var mode = (string)item.Tag;
+        if (mode == _cfg.DirectDisplayMode) return;
+        _cfg.DirectDisplayMode = mode;
+        SyncDirectConfigToGameDir();
+    }
+
+    private void TxtDirectPrefix_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        var prefix = string.IsNullOrWhiteSpace(TxtDirectPrefix.Text) ? "[译]" : TxtDirectPrefix.Text;
+        TxtDirectPrefix.Text = prefix;
+        if (prefix == _cfg.DirectDisplayPrefix) return;
+        _cfg.DirectDisplayPrefix = prefix;
+        SyncDirectConfigToGameDir();
     }
 }

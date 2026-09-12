@@ -408,6 +408,20 @@
                                 <ComboBoxItem Content="Track B — 自有 Direct DLL（实验）" Tag="direct" />
                             </ComboBox>
                             <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <TextBlock Text="Track B 译文显示：" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <ComboBox x:Name="CmbDirectDisplay" Width="200"
+                                          SelectionChanged="CmbDirectDisplay_SelectionChanged">
+                                    <ComboBoxItem Content="译文替换原文" Tag="replace" />
+                                    <ComboBoxItem Content="原文+译文（前缀追加）" Tag="both" />
+                                </ComboBox>
+                                <TextBlock Text="前缀" VerticalAlignment="Center" Margin="10,0,4,0" />
+                                <TextBox x:Name="TxtDirectPrefix" Width="90" Text="[译]"
+                                         LostFocus="TxtDirectPrefix_LostFocus" />
+                            </StackPanel>
+                            <TextBlock x:Name="TxtDirectDisplayHint" Style="{StaticResource Dim}"
+                                       Margin="0,4,0,0" TextWrapping="Wrap"
+                                       Text="显示模式随 WoWTranslateDirect.json 写入游戏目录，切换轨道或修改后自动更新，重新登录游戏后生效。" />
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                                 <Button x:Name="BtnSwitchDll" Content="切换到此轨道"
                                         Style="{StaticResource PrimaryBtn}" Padding="14,4"
                                         Click="BtnSwitchDll_Click" />

@@ -10,6 +10,9 @@
 // 与 GS 的差异（本 DLL 的核心价值）：全程无宽字符→ANSI 转换，中文逐字 '?' 问题根治。
 #include "wt_common.h"
 #include "translator.h"
+#include "driver_lua.h"
+#include "json.hpp"   // third_party/json.hpp（translator.cpp 同款）
+using json = nlohmann::json;
 
 // ==================== 3.3.5a 决定版地址表（默认基址 0x400000）====================
 
@@ -36,6 +39,9 @@ static LuaAddr g_addrs[] = {
     { 0x84E030, "lua_tonumber",     "\x55\x8B\xEC", 3 },
     { 0x84E280, "lua_pushnil",      "\x55\x8B\xEC", 3 },
     { 0x84EC50, "lua_pcall",        "\x55\x8B\xEC", 3 },
+    // FrameScript_Execute（/run 实现，IDA dump 0x819210）：__cdecl (code, len, errHandler)
+    // 内部自带全局 L（dword_D3F78C）、registry 错误处理器保存恢复、栈平衡。
+    { 0x819210, "FrameScript_Execute", "\x55\x8B\xEC", 3 },
 };
 
 // ==================== Lua API 函数指针（cdecl）====================
@@ -65,6 +71,7 @@ typedef const char* (*fn_lua_tolstring)(lua_State*, int, size_t*);
 typedef int         (*fn_lua_isstring)(lua_State*, int);
 typedef int         (*fn_lua_isnumber)(lua_State*, int);
 typedef double      (*fn_lua_tonumber)(lua_State*, int);
+typedef int         (*fn_FrameScript_Execute)(const char* code, int len, int errHandler); // 0x819210
 
 static fn_lua_gettop        p_gettop;
 static fn_lua_pushstring    p_pushstring;
@@ -77,6 +84,7 @@ static fn_lua_tolstring     p_tolstring;
 static fn_lua_isstring      p_isstring;
 static fn_lua_isnumber      p_isnumber;
 static fn_lua_tonumber      p_tonumber;
+static fn_FrameScript_Execute p_Execute;   // 0x819210（主线程专用，见 TryInjectDriver）
 
 // ==================== hook 状态 ====================
 
@@ -146,13 +154,15 @@ WT_NOINLINE static int L_Status(lua_State* L)
 }
 
 // ---- Configure: (json) → "ok" | "error|msg" ----
+// v16：客户端是 UTF-8 通道（v15 \ddd 探针定案），原样透传不做 GBK 假设
+//（/run 里用户敲的字符串、驱动注入的 JSON 都是 UTF-8 字节）。
 WT_NOINLINE static int L_Configure_impl(lua_State* L)
 {
     const char* raw = NULL;
     if (p_isstring(L, 1))
         raw = p_tolstring(L, 1, NULL);
-    std::string jsonGbk = raw ? raw : "";
-    std::string result = wt::Translator::Inst().Configure(wt::GbkToUtf8(jsonGbk));
+    std::string json = raw ? raw : "";
+    std::string result = wt::Translator::Inst().Configure(json);
     return PushResult(L, result);
 }
 WT_NOINLINE static int L_Configure(lua_State* L)
@@ -162,12 +172,14 @@ WT_NOINLINE static int L_Configure(lua_State* L)
 }
 
 // ---- Translate: (text, from, to, requestId) → "ok" | "error|msg" ----
+// v16：v15 定案客户端 = UTF-8 通道（AwesomeWotlk），入站原样透传。
+// 旧 GbkToUtf8 会把 UTF-8 中文当 GBK 再编一次 → 乱码（ASCII 不受影响所以 v15 未暴露）。
 WT_NOINLINE static int L_Translate_impl(lua_State* L)
 {
     const char* raw = NULL;
     if (p_isstring(L, 1))
         raw = p_tolstring(L, 1, NULL);
-    std::string textGbk = raw ? raw : "";
+    std::string text = raw ? raw : "";
 
     const char* from = p_isstring(L, 2) ? p_tolstring(L, 2, NULL) : "zh";
     const char* to   = p_isstring(L, 3) ? p_tolstring(L, 3, NULL) : "en";
@@ -177,7 +189,7 @@ WT_NOINLINE static int L_Translate_impl(lua_State* L)
     _snprintf(idBuf, sizeof(idBuf), "%.0f", idNum);
 
     std::string err;
-    if (!wt::Translator::Inst().Queue(idBuf, wt::GbkToUtf8(textGbk), from, to, err))
+    if (!wt::Translator::Inst().Queue(idBuf, text, from, to, err))
     {
         WT_LOG_ERROR("Translate queue failed: " + err);
         return PushResult(L, "error|" + err);
@@ -386,10 +398,64 @@ static lua_State* volatile g_confirmedL = NULL;   // 已见 depth>0（真实脚�
 static lua_State* volatile g_seenGlobalL = NULL;  // 上次观察到的 *(0xD3F78C)，用于状态切换日志
 static volatile LONG g_registerDone = 0;
 
+// ==================== v16：驱动 Lua 注入（全自治模式）====================
+
+// 显示配置（AutoConfigure 从 WoWTranslateDirect.json 解析；缺省 replace/[译]）
+static std::string g_displayMode   = "replace";   // "replace" | "both"
+static std::string g_displayPrefix = "[译]";      // UTF-8（客户端为 UTF-8 通道）
+
+static std::string g_driverChunk;                 // 配置前缀 + 驱动 Lua，InitThread 组装
+static volatile LONG g_driverDone = 0;            // 一次性：无论成败只注入一次
+static volatile LONG g_driverBusy = 0;            // 重入保护（FrameScript_Execute 内部会再触发 gettop）
+
+// SEH 执行体单独成函数（C2712：__try 所在函数禁止 std::string 临时量等需展开对象）
+static int ExecuteDriverChunk()
+{
+    int rc = -1;
+    __try
+    {
+        rc = p_Execute(g_driverChunk.c_str(), (int)g_driverChunk.size(), 0);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        rc = -2;
+    }
+    return rc;
+}
+
+// 注册成功后，在 gettop detour（Lua 主线程）内等待 depth==0 干净边界一次性执行。
+// ⚠ 绝不能在 InitThread 等非主线程调 FrameScript_Execute —— Lua 状态非线程安全。
+static void TryInjectDriver(lua_State* L)
+{
+    if (g_driverDone) return;
+    if (InterlockedCompareExchange(&g_driverBusy, 1, 0) != 0) return;
+
+    int depth = ((fn_lua_gettop)g_pTrampoline)(L);
+    if (depth != 0)                               // 只在空栈边界注入
+    {
+        InterlockedExchange(&g_driverBusy, 0);
+        return;
+    }
+
+    int rc = ExecuteDriverChunk();
+    InterlockedExchange(&g_driverDone, 1);
+    InterlockedExchange(&g_driverBusy, 0);
+
+    char buf[128];
+    _snprintf(buf, sizeof(buf), "driver lua injected rc=%d chunkLen=%d", rc, (int)g_driverChunk.size());
+    if (rc >= 0) WT_LOG_INFO(buf); else WT_LOG_ERROR(buf);
+}
+
 static void OnGetTop(lua_State* L)
 {
     if (!L) return;
-    if (g_registerDone && L == g_globalL) return;   // 完成+同全局 L → 单比较直通
+    if (g_registerDone && L == g_globalL)
+    {
+        // 注册完成后的唯一入口：等待空栈边界注入驱动 Lua（一次性）
+        if (!g_driverDone && g_driverChunk.size() > 0 && p_Execute)
+            TryInjectDriver(L);
+        return;
+    }
 
     lua_State* cur = *(lua_State**)0xD3F78C;        // 客户端全局 lua_State
     if (!cur || L != cur) return;                   // 内部辅助状态 → 一律不碰
@@ -401,6 +467,8 @@ static void OnGetTop(lua_State* L)
         char buf[80];
         _snprintf(buf, sizeof(buf), "global L switched: 0x%08X", (unsigned)(uintptr_t)cur);
         WT_LOG_INFO(buf);
+        // /reload → 新 Lua 状态（旧驱动的 hook/帧随旧状态销毁）→ 重注驱动
+        InterlockedExchange(&g_driverDone, 0);
     }
 
     // 调原函数（trampoline）拿真实栈深：top - base
@@ -561,6 +629,21 @@ static void AutoConfigure()
             CloseHandle(h);
             if (rd > 0)
             {
+                // v16：displayMode/displayPrefix 由本 DLL 消费（驱动 Lua 注入用），与
+                // provider 配置解耦——json 解析失败或只写显示键时走默认端点配置。
+                try
+                {
+                    json disp = json::parse(std::string(buf, rd));
+                    if (disp.contains("displayMode") && disp["displayMode"].is_string())
+                        g_displayMode = disp["displayMode"].get<std::string>();
+                    if (disp.contains("displayPrefix") && disp["displayPrefix"].is_string())
+                        g_displayPrefix = disp["displayPrefix"].get<std::string>();
+                    if (g_displayMode != "replace" && g_displayMode != "both")
+                        g_displayMode = "replace";
+                    WT_LOG_INFO("display config: mode=" + g_displayMode);
+                }
+                catch (...) {}
+
                 std::string r = wt::Translator::Inst().Configure(std::string(buf, rd));
                 WT_LOG_INFO("auto-config from file -> " + r);
                 if (r.rfind("ok", 0) == 0) return;      // 文件配置成功
@@ -607,6 +690,12 @@ static DWORD WINAPI InitThread(LPVOID)
     p_isstring     = (fn_lua_isstring)0x84DF60;
     p_isnumber     = (fn_lua_isnumber)0x84DF20;
     p_tonumber     = (fn_lua_tonumber)0x84E030;
+    p_Execute      = (fn_FrameScript_Execute)0x819210;  // 主线程专用（TryInjectDriver）
+
+    // v16 驱动块：配置前缀（WTC 全局表）+ 驱动 Lua，注册成功后主线程注入
+    g_driverChunk = std::string("WTC={displayMode='") + wt::LuaEscape(g_displayMode) +
+                    "',prefix='" + wt::LuaEscape(g_displayPrefix) + "'}\n" +
+                    wt::DriverLuaCode();
 
     // 保存 gettop 原 6 字节（gettop 签名前 6 字节，指令边界：push ebp / mov ebp,esp / mov ecx,[ebp+8]）
     g_hookTarget = (BYTE*)0x84DBD0;

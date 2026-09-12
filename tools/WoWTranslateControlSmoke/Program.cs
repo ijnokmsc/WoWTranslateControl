@@ -111,8 +111,12 @@ internal static class Program
             "ChkChanParty", "ChkChanGuild", "ChkChanRaid", "ChkChanBg",
             "ChkChanWorld", "ChkChanUntagged");
         Expect(w, errors, "TxtGameDir", "BtnConfigurePlugin", "BtnWizard", "TxtPluginReport");
-        // DLL 轨道切换卡（ADR-007）+ 托盘开关
-        Expect(w, errors, "CmbDllTrack", "BtnSwitchDll", "BtnRefreshDll", "TxtDllStatus", "ChkTray");
+        // DLL 轨道切换卡（ADR-007）+ 托盘开关 + Track B 显示模式（v16 全自治驱动）
+        Expect(w, errors, "CmbDllTrack", "BtnSwitchDll", "BtnRefreshDll", "TxtDllStatus", "ChkTray",
+            "CmbDirectDisplay", "TxtDirectPrefix");
+        var dispMode = FindByName<System.Windows.Controls.ComboBox>(w, "CmbDirectDisplay");
+        if (dispMode != null && dispMode.Items.Count != 2)
+            errors.Add($"CmbDirectDisplay 应有 2 个显示模式项，实际 {dispMode.Items.Count}");
         var dllStatus = FindByName<System.Windows.Controls.TextBlock>(w, "TxtDllStatus");
         if (dllStatus == null || string.IsNullOrEmpty(dllStatus.Text) ||
             dllStatus.Text.Contains("检测失败"))

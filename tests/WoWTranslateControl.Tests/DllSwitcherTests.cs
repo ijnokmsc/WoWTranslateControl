@@ -17,6 +17,8 @@ public class DllSwitcherTests
     private static string MakeFakeGame()
     {
         var game = TempDir();
+        // 2026-09-12 起 SwitchTo 有 Wow.exe 目录门禁，假客户端根目录必须带 Wow.exe
+        File.WriteAllText(Path.Combine(game, "Wow.exe"), "fake-wow");
         File.WriteAllText(Path.Combine(game, "dinput8.dll"), "fake-dinput-gs");
         File.WriteAllText(Path.Combine(game, "WoWTranslate335.dll"), "fake-gs-dll");
         File.WriteAllText(Path.Combine(game, "dlls.txt"), "WoWTranslate335.dll\n");
