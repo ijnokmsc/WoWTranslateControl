@@ -383,7 +383,10 @@ static DWORD WINAPI InitThread(LPVOID)
     wt::LogInit();
     WT_LOG_INFO("WoWTranslateDirect 1.0 init (Track B direct engine)");
 
-    Sleep(3000); // 等客户端 FrameScript 就绪（对齐 GS 时序）
+    // ⚠ 不等待！必须在 Lua 初始化之前装好 hook（对齐 GS 的 DllMain 即时 hook）。
+    // 之前等 3 秒的后果：hook 落在 GlueXML 加载中途，首个捕获的 L 是加载线程的
+    // 内部状态，注册动作与该线程竞态 → 打断 GlueXML 加载 → ShowScene nil 崩溃。
+    // Lua 未初始化时 gettop 不会被调用，hook 静等第一次调用（必在 UI 主线程）。
 
     if (!VerifyAddresses())
     {
