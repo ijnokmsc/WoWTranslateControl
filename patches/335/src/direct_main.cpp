@@ -41,7 +41,11 @@ static LuaAddr g_addrs[] = {
 typedef struct lua_State lua_State;
 typedef int (*lua_CFunction)(lua_State* L);
 
-#define LUA_GLOBALSINDEX (-10002)
+// ⚠ 3.3.5 客户端魔改过伪索引（IDA index2adr 0x84D9C0 反编译实锤）：
+//   -10002 → L+72 内嵌 TValue（非全局表！标准 5.1 的 GLOBALSINDEX 在此客户端无效）
+//   -10001 → 环境表（ENVIRONINDEX）
+//   -10000 → G(L)->l_gt = 全局表（FrameScript_Execute 0x819210 用 getfield(L,-10000,..) 取全局变量为铁证）
+#define LUA_GLOBALSINDEX (-10000)
 
 #define WT_NOINLINE __declspec(noinline)
 
