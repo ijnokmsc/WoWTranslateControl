@@ -17,5 +17,10 @@
     <None Remove="tests\**" />
     <Compile Remove="tools\**" />
     <None Remove="tools\**" />
+    <!-- Track B Direct DLL 资产随构建/发布自动输出到输出目录 assets\direct-dll（DllSwitcher 按 BaseDirectory 探测） -->
+    <None Include="assets\direct-dll\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>assets\direct-dll\%(Filename)%(Extension)</Link>
+    </None>
   </ItemGroup>
 </Project>
