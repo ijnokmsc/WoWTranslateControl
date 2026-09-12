@@ -23,9 +23,11 @@ static LuaAddr g_addrs[] = {
     { 0x84DBF0, "lua_settop",       "\x55\x8B\xEC", 3 },
     { 0x84E350, "lua_pushstring",   "\x55\x8B\xEC", 3 },
     { 0x84E400, "lua_pushcclosure", "\x55\x8B\xEC", 3 },
-    // ⚠ 真 settable = 0x84E600（index2adr + 弹 2 + luaV_settable，反汇编实锤）。
-    //   PyWoW 表的 0x84E670 实为 lua_getfield，曾致 16-slot 泄漏崩溃。
-    { 0x84E600, "lua_settable",     "\x55\x8B\xEC\x8B\x45\x0C\x56\x8B\x75\x08\x8B\xCE", 12 },
+    // ⚠ 真 settable = 0x84E8D0（16 字节：index2adr + luaV_settable(L,t,top-2,top-1)
+    //   + top-=0x20，反汇编逐行吻合 Lua 5.1 源码；GS wow_register 内部 call 目标实锤）。
+    //   PyWoW 表的 0x84E670 实为 lua_getfield（曾致 16-slot 泄漏崩溃）；
+    //   0x84E600 是别的内部函数（调用即 SEH）。
+    { 0x84E8D0, "lua_settable",     "\x55\x8B\xEC\x8B\x45\x0C\x56\x8B\x75\x08\x8B\xCE", 12 },
     { 0x84E0E0, "lua_tolstring",    "\x55\x8B\xEC", 3 },
     { 0x84DF60, "lua_isstring",     "\x55\x8B\xEC", 3 },
     { 0x84DF20, "lua_isnumber",     "\x55\x8B\xEC", 3 },
@@ -236,7 +238,8 @@ static RegEntry g_regs[] = {
 // 栈平衡：每对 pushstring(+1) + pushcclosure(+1) + settable(-2) = 净 0。
 // ⚠ 地址表血泪教训：PyWoW 表的 0x84E670 实为 lua_getfield（压 1 不弹）——
 //   v1-v5 用它当 setfield 导致每对净 +2、8 对泄漏 16 slot（depthBefore=2 → depthAfter=18），
-//   Lua 栈从此不一致 → ShowScene nil。真 settable = 0x84E600（反汇编实锤弹 2）。
+//   Lua 栈从此不一致 → ShowScene nil。0x84E600 调用即 SEH（非 settable）。
+//   真 settable = 0x84E8D0（GS wow_register 内部 call 目标实锤 + 逐行反汇编吻合 5.1 源码）。
 // 防御：每对操作后校验栈深恢复，不匹配立即中止（最多泄漏一对，不伤 Lua 状态）。
 static bool TryRegisterCore(lua_State* L)
 {
@@ -436,7 +439,7 @@ static DWORD WINAPI InitThread(LPVOID)
     p_gettop       = (fn_lua_gettop)0x84DBD0;
     p_pushstring   = (fn_lua_pushstring)0x84E350;
     p_pushcclosure = (fn_lua_pushcclosure)0x84E400;
-    p_settable     = (fn_lua_settable)0x84E600;
+    p_settable     = (fn_lua_settable)0x84E8D0;
     p_tolstring    = (fn_lua_tolstring)0x84E0E0;
     p_isstring     = (fn_lua_isstring)0x84DF60;
     p_isnumber     = (fn_lua_isnumber)0x84DF20;
