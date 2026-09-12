@@ -18,16 +18,18 @@ static const DWORD DEFAULT_BASE = 0x400000;
 struct LuaAddr { DWORD va; const char* name; const char* sig; int sigLen; };
 
 // sig = 序言字节签名（GS 日志 + exe 字节双源确认；其余函数至少验证 "55 8B" 标准序言）
+// ⚠ getfield/settable/rawget 前 11 字节完全相同（55 8B EC 8B 45 0C 56 8B 75 08 8B CE），
+//   必须用 17 字节（含 call rel32）才能区分——2026-09-12 IDA get_bytes 定案。
 static LuaAddr g_addrs[] = {
     { 0x84DBD0, "lua_gettop",       "\x55\x8B\xEC\x8B\x4D\x08\x8B\x41\x0C\x2B\x41\x10", 12 },
     { 0x84DBF0, "lua_settop",       "\x55\x8B\xEC", 3 },
     { 0x84E350, "lua_pushstring",   "\x55\x8B\xEC", 3 },
     { 0x84E400, "lua_pushcclosure", "\x55\x8B\xEC", 3 },
-    // ⚠ 真 settable = 0x84E8D0（16 字节：index2adr + luaV_settable(L,t,top-2,top-1)
-    //   + top-=0x20，反汇编逐行吻合 Lua 5.1 源码；GS wow_register 内部 call 目标实锤）。
-    //   PyWoW 表的 0x84E670 实为 lua_getfield（曾致 16-slot 泄漏崩溃）；
-    //   0x84E600 是别的内部函数（调用即 SEH）。
-    { 0x84E8D0, "lua_settable",     "\x55\x8B\xEC\x8B\x45\x0C\x56\x8B\x75\x08\x8B\xCE", 12 },
+    { 0x84E600, "lua_rawget",       "\x55\x8B\xEC\x8B\x45\x0C\x56\x8B\x75\x08\x8B\xCE\xE8\xAF\xF3\xFF\xFF", 17 },
+    { 0x84E670, "lua_getfield",     "\x55\x8B\xEC\x8B\x45\x0C\x56\x8B\x75\x08\x8B\xCE\xE8\x3F\xF3\xFF\xFF", 17 },
+    // 真 settable = 0x84E8D0（wow_register 内部 call 目标，push (L, idx) 两参 cdecl）。
+    //   PyWoW 表的 0x84E670 实为 lua_getfield（曾致 16-slot 泄漏崩溃）；0x84E600 是 lua_rawget。
+    { 0x84E8D0, "lua_settable",     "\x55\x8B\xEC\x8B\x45\x0C\x56\x8B\x75\x08\x8B\xCE\xE8\xDF\xF0\xFF\xFF", 17 },
     { 0x84E0E0, "lua_tolstring",    "\x55\x8B\xEC", 3 },
     { 0x84DF60, "lua_isstring",     "\x55\x8B\xEC", 3 },
     { 0x84DF20, "lua_isnumber",     "\x55\x8B\xEC", 3 },
@@ -41,11 +43,14 @@ static LuaAddr g_addrs[] = {
 typedef struct lua_State lua_State;
 typedef int (*lua_CFunction)(lua_State* L);
 
-// ⚠ 3.3.5 客户端魔改过伪索引（IDA index2adr 0x84D9C0 反编译实锤）：
-//   -10002 → L+72 内嵌 TValue（非全局表！标准 5.1 的 GLOBALSINDEX 在此客户端无效）
-//   -10001 → 环境表（ENVIRONINDEX）
-//   -10000 → G(L)->l_gt = 全局表（FrameScript_Execute 0x819210 用 getfield(L,-10000,..) 取全局变量为铁证）
-#define LUA_GLOBALSINDEX (-10000)
+// ⚠ 伪索引定案（2026-09-12 IDA index2adr 0x84D9C0 反汇编，非反编译）：
+//   -10000 → *(L+0x14)+0x68 = G(L)+0x68 = REGISTRY（注册表，标准 5.1！
+//             此前会话误读 FrameScript_Execute 的 registry 错误处理器查找为「取全局」）
+//   -10001 → 当前函数环境（ci->func 的 env，材质化到 L+0x58）
+//   -10002 → L+0x48 内嵌 TValue = GLOBALS（gt 表就在 lua_State 里，非标准布局但标准索引值）
+//   wow_register(0x8167E0) 用 settable(L,-3)——目标表由调用者压栈，从不用伪索引！
+//   因此注册必须复刻官方模式：表压栈 + settable(-3)，不碰伪索引。
+#define LUA_GLOBALSINDEX_L48 (-10002)   // index2adr → L+0x48
 
 #define WT_NOINLINE __declspec(noinline)
 
@@ -53,7 +58,8 @@ typedef int         (*fn_lua_gettop)(lua_State*);
 typedef void        (*fn_lua_pushstring)(lua_State*, const char*);
 typedef void        (*fn_lua_pushcclosure)(lua_State*, lua_CFunction, int);
 typedef void        (*fn_lua_settable)(lua_State*, int);   // 弹 key+value 写入表
-typedef void        (*fn_lua_getfield)(lua_State*, int, const char*); // 0x84E670（IDA 验明，压 1）
+typedef void        (*fn_lua_rawget)(lua_State*, int);     // 0x84E600：t@idx，key@top → 原位换 value（裸读，不走 __index）
+typedef void        (*fn_lua_getfield)(lua_State*, int, const char*); // 0x84E670（裸读，压 1）
 typedef void        (*fn_lua_settop)(lua_State*, int);
 typedef const char* (*fn_lua_tolstring)(lua_State*, int, size_t*);
 typedef int         (*fn_lua_isstring)(lua_State*, int);
@@ -64,7 +70,8 @@ static fn_lua_gettop        p_gettop;
 static fn_lua_pushstring    p_pushstring;
 static fn_lua_pushcclosure  p_pushcclosure;
 static fn_lua_settable      p_settable;
-static fn_lua_getfield      p_getfield;    // 0x84E670（IDA 验明真身，用于注册自检）
+static fn_lua_rawget        p_rawget;
+static fn_lua_getfield      p_getfield;    // 0x84E670（裸读，用于自检/探针）
 static fn_lua_settop        p_settop;
 static fn_lua_tolstring     p_tolstring;
 static fn_lua_isstring      p_isstring;
@@ -241,48 +248,151 @@ static RegEntry g_regs[] = {
     { "WoWTranslate_Diag",         L_Diag },
 };
 
-// 在 detour（Lua 主线程）内调用：GS 三件套注册（pushstring + pushcclosure + settable）。
-// 栈平衡：每对 pushstring(+1) + pushcclosure(+1) + settable(-2) = 净 0。
-// ⚠ 地址表血泪教训：PyWoW 表的 0x84E670 实为 lua_getfield（压 1 不弹）——
-//   v1-v5 用它当 setfield 导致每对净 +2、8 对泄漏 16 slot（depthBefore=2 → depthAfter=18），
-//   Lua 栈从此不一致 → ShowScene nil。0x84E600 调用即 SEH（非 settable）。
-//   真 settable = 0x84E8D0（GS wow_register 内部 call 目标实锤 + 逐行反汇编吻合 5.1 源码）。
-// 防御：每对操作后校验栈深恢复，不匹配立即止损（最多泄漏一对，不伤 Lua 状态）。
-// 注册完成后自检：getfield(_G, "WoWTranslate_Version") 取回 tt 必须是 function(6)。
-// 返回：0=注册+自检 OK，1=SEH，2=栈深不匹配，3=自检失败（写进去了但取不回）
-static volatile LONG g_selfcheckTT = -1;   // rc=3 时记录自检实际读到的 TValue.tt
+// 在 detour（Lua 主线程）内调用。v12 设计（2026-09-12，IDA 反汇编定案）：
+// 结构探针 → 尝试 A（官方模式：gt TValue 压栈 + settable(-3)）→ 尝试 B（写 gt.__index 函数库表）。
+// 可见性自检 = 模拟 /run 的 OP_GETGLOBAL：raw 读 gt，miss 后走 __index 链。
+// ⚠ __try 内禁止 std::string（C2712），所有结果存全局变量，由 TryRegister 在 __try 外打日志。
+// 返回：0=A 成功，6=B 成功，1=SEH，2=栈深异常，4=gt 不是表，5=无 __index 表，7=A 后可见性失败且 B 不适用
+static volatile LONG g_pG        = -1;   // *(L+0x14) = global_State
+static volatile LONG g_pRegV     = -1;   // G+0x68 TValue.value（-10000 目标）
+static volatile LONG g_pRegTT    = -1;
+static volatile LONG g_pGtV      = -1;   // L+0x48 TValue.value（-10002 目标 = gt）
+static volatile LONG g_pGtTT     = -1;
+static volatile LONG g_ttRegPrint = -1;  // getfield(-10000,"print")
+static volatile LONG g_ttGtPrint  = -1;  // getfield(-10002,"print")
+static volatile LONG g_ttEnvPrint = -1;  // getfield(-10001,"print")
+static volatile LONG g_ttRegVer   = -1;  // getfield(-10000,"WoWTranslate_Version")（v11 遗留写回读）
+static volatile LONG g_ttGtVer0   = -1;  // 注册前 getfield(-10002,"WoWTranslate_Version")
+static volatile LONG g_ttA_ver    = -1;  // A 后 raw 读 gt
+static volatile LONG g_ttB_vis    = -1;  // B 后 OP_GETGLOBAL 模拟
+static volatile LONG g_rcPath     = -1;  // 0=A，1=B
+
+// 读 (top-1) 槽的 TValue.tt（3.3.5 布局：value 8B @0，tt @+8，warden shadow @+12）
+static int TopTT(lua_State* L)
+{
+    return *(int*)(*(DWORD*)((BYTE*)L + 0xC) - 0x10 + 8);
+}
+
+// getfield(idx, name) → 读 tt → 弹回。只能在 __try 内调用。
+static int ProbeTT(lua_State* L, int idx, const char* name)
+{
+    p_getfield(L, idx, name);
+    int tt = TopTT(L);
+    p_settop(L, -2);
+    return tt;
+}
+
+// 模拟 /run 的 OP_GETGLOBAL：raw 读 gt，miss 后走 __index 表（raw 读链）。
+// 栈自平衡到调用前深度。只能在 __try 内调用。
+static int VisibilityTT(lua_State* L)
+{
+    BYTE* Lb = (BYTE*)L;
+    int depth0 = ((fn_lua_gettop)g_pTrampoline)(L);
+    DWORD top = *(DWORD*)(Lb + 0xC);
+    memcpy((void*)top, Lb + 0x48, 16);               // 压 gt TValue 副本
+    *(DWORD*)(Lb + 0xC) = top + 16;
+    p_pushstring(L, "WoWTranslate_Version");
+    p_rawget(L, -2);                                 // [E, v]
+    int tt = TopTT(L);
+    if ((tt & 0x1F) != 6)
+    {
+        p_pushstring(L, "__index");                  // [E, v, "__index"]
+        p_rawget(L, -3);                             // t=E(-3) → slot := E.__index
+        int ttIx = TopTT(L);
+        if ((ttIx & 0x1F) == 5)                      // __index 是表 → 继续链
+        {
+            p_pushstring(L, "WoWTranslate_Version"); // [E, v, t2, name]
+            p_rawget(L, -2);                         // t=t2(-2) → slot := t2[name]
+            tt = TopTT(L);
+        }
+        else tt = 0;
+    }
+    while (((fn_lua_gettop)g_pTrampoline)(L) > depth0)
+        p_settop(L, -2);                             // 逐个弹回到边界
+    return tt;
+}
 
 static int TryRegisterCore(lua_State* L)
 {
     int depth0 = ((fn_lua_gettop)g_pTrampoline)(L);
     __try
     {
+        BYTE* Lb = (BYTE*)L;
+
+        // ---------- 结构探针（一次运行回答所有布局问题）----------
+        DWORD G = *(DWORD*)(Lb + 0x14);
+        g_pG = (LONG)G;
+        g_pRegV = *(DWORD*)(G + 0x68);  g_pRegTT = *(int*)(G + 0x68 + 8);
+        g_pGtV  = *(DWORD*)(Lb + 0x48); g_pGtTT  = *(int*)(Lb + 0x48 + 8);
+        if ((g_pRegTT & 0x1F) == 5)
+        {
+            g_ttRegPrint = ProbeTT(L, -10000, "print");
+            g_ttRegVer   = ProbeTT(L, -10000, "WoWTranslate_Version");
+        }
+        if ((g_pGtTT & 0x1F) == 5)
+        {
+            g_ttGtPrint = ProbeTT(L, -10002, "print");
+            g_ttGtVer0  = ProbeTT(L, -10002, "WoWTranslate_Version");
+        }
+        g_ttEnvPrint = ProbeTT(L, -10001, "print");
+
+        // ---------- 尝试 A：官方模式——gt TValue 压栈 + settable(-3) ----------
+        if ((g_pGtTT & 0x1F) != 5)
+            return 4;                                    // L+0x48 不是表 → 放弃 A
+
+        DWORD top = *(DWORD*)(Lb + 0xC);
+        memcpy((void*)top, Lb + 0x48, 16);               // 压 gt TValue 副本（含 shadow）
+        *(DWORD*)(Lb + 0xC) = top + 16;
+
         for (int i = 0; i < (int)(sizeof(g_regs) / sizeof(g_regs[0])); ++i)
         {
             p_pushstring(L, g_regs[i].name);
             p_pushcclosure(L, g_regs[i].fn, 0);
-            p_settable(L, LUA_GLOBALSINDEX);
-
+            p_settable(L, -3);                           // t = gt @ -3（wow_register 同款）
             int depthNow = ((fn_lua_gettop)g_pTrampoline)(L);
-            if (depthNow != depth0)
-                return 2;   // 栈没恢复 → 地址错/状态坏，立即止损
+            if (depthNow != depth0 + 1)
+                return 2;
         }
+        p_settop(L, -2);                                 // 弹出 gt 副本
 
-        // ---- 注册自检：从 _G 取回函数验明类型 ----
-        // ⚠ Lua 5.1 闭包是可回收对象：Closure 存进表后的真实 tt = LUA_TFUNCTION|0x40 = 0x46，
-        //   不是裸值 6。v10 用 tt!=6 判定导致「已写成功但自检恒败」rc=3×64（11:53 日志实锤：
-        //   每对栈深净 0 = push/settable 全部正常，唯 tt 判定错误）。GS 无自检故无此坑。
-        p_getfield(L, LUA_GLOBALSINDEX, "WoWTranslate_Version");
-        DWORD top   = *(DWORD*)((BYTE*)L + 0xC);          // L->top（getfield 后已 +0x10）
-        int   tt    = *(int*)(top - 0x10 + 8);            // TValue.tt @ +8（3.3.5 布局）
-        p_settop(L, -2);                                  // 弹回自检值
-        if ((tt & 0x1F) != 6)                             // LUA_TFUNCTION（兼容 6 / 0x46）
+        g_ttA_ver = ProbeTT(L, LUA_GLOBALSINDEX_L48, "WoWTranslate_Version");
+        if ((g_ttA_ver & 0x1F) == 6)
         {
-            g_selfcheckTT = tt;                           // __try 内禁 std::string，tt 带出去打
-            return 3;
+            g_rcPath = 0;
+            return 0;                                    // raw 写 gt 成功，/run raw 命中
         }
 
-        return 0;
+        // ---------- 尝试 B：写入 gt.__index（客户端函数库表 t2）----------
+        top = *(DWORD*)(Lb + 0xC);
+        memcpy((void*)top, Lb + 0x48, 16);               // [gt]
+        *(DWORD*)(Lb + 0xC) = top + 16;
+        p_pushstring(L, "__index");                      // [gt, "__index"]
+        p_rawget(L, -2);                                 // [gt, t2?]（裸读）
+        int ttT2 = TopTT(L);
+        if ((ttT2 & 0x1F) != 5)
+        {
+            p_settop(L, -2);                             // 弹 t2 槽
+            p_settop(L, -2);                             // 弹 gt
+            g_rcPath = 2;
+            return 5;                                    // gt 无 __index 表
+        }
+        for (int i = 0; i < (int)(sizeof(g_regs) / sizeof(g_regs[0])); ++i)
+        {
+            p_pushstring(L, g_regs[i].name);             // [gt,t2,name]
+            p_pushcclosure(L, g_regs[i].fn, 0);          // [gt,t2,name,fn]
+            p_settable(L, -3);                           // t2[name]=fn → [gt,t2]
+            int depthNow = ((fn_lua_gettop)g_pTrampoline)(L);
+            if (depthNow != depth0 + 2)
+                return 2;
+        }
+        p_settop(L, -3);                                 // 弹 t2+gt
+        g_ttB_vis = VisibilityTT(L);
+        if ((g_ttB_vis & 0x1F) == 6)
+        {
+            g_rcPath = 1;
+            return 6;                                    // 经 __index 链可见
+        }
+        return 7;
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
     {
@@ -293,15 +403,26 @@ static int TryRegisterCore(lua_State* L)
 WT_NOINLINE static int TryRegister(lua_State* L)
 {
     int rc = TryRegisterCore(L);
-    if (rc == 0)
-        return 0;
-    char buf[96];
-    if (rc == 3)
-        _snprintf(buf, sizeof(buf), "register failed rc=3 selfcheck tt=0x%02X (expect 6 or 0x46), attempt=%s",
-                  (unsigned)g_selfcheckTT, std::to_string(g_attemptCount).c_str());
-    else
-        _snprintf(buf, sizeof(buf), "register failed rc=%d, attempt=%s",
-                  rc, std::to_string(g_attemptCount).c_str());
+    if (rc == 0 || rc == 6)
+        return rc;
+
+    char buf[400];
+    if (g_attemptCount == 1)
+    {
+        _snprintf(buf, sizeof(buf),
+                  "probe G=0x%08X reg{v=0x%08X tt=%d} gt{v=0x%08X tt=%d} "
+                  "print[reg=%d gt=%d env=%d] ver[reg=%d gt0=%d]",
+                  (unsigned)g_pG,
+                  (unsigned)g_pRegV, (int)g_pRegTT,
+                  (unsigned)g_pGtV, (int)g_pGtTT,
+                  (int)g_ttRegPrint, (int)g_ttGtPrint, (int)g_ttEnvPrint,
+                  (int)g_ttRegVer, (int)g_ttGtVer0);
+        WT_LOG_INFO(buf);
+    }
+    _snprintf(buf, sizeof(buf),
+              "register failed rc=%d path=%d ttA=%d ttBvis=%d, attempt=%s",
+              rc, (int)g_rcPath, (int)g_ttA_ver, (int)g_ttB_vis,
+              std::to_string(g_attemptCount).c_str());
     WT_LOG_ERROR(buf);
     return rc;
 }
@@ -373,15 +494,17 @@ static void OnGetTop(lua_State* L)
         return;
     }
 
-    if (TryRegister(L) == 0)
+    int rc = TryRegister(L);
+    if (rc == 0 || rc == 6)
     {
         g_globalL = L;
         InterlockedExchange(&g_registerDone, 1);
         int depthAfter = ((fn_lua_gettop)g_pTrampoline)(L); // GS 同款栈恢复验证
         char buf[128];
         _snprintf(buf, sizeof(buf),
-                  "WoWTranslate_* registered into _G (L=0x%08X depthBefore=%d depthAfter=%d) verify=OK",
-                  (unsigned)(uintptr_t)L, depth, depthAfter);
+                  "WoWTranslate_* registered (L=0x%08X path=%s depthBefore=%d depthAfter=%d) verify=OK",
+                  (unsigned)(uintptr_t)L, rc == 0 ? "A:raw-gt" : "B:__index-t2",
+                  depth, depthAfter);
         WT_LOG_INFO(buf);
     }
 }
@@ -466,7 +589,7 @@ static bool VerifyAddresses()
             return false;
         }
     }
-    WT_LOG_INFO("all 11 lua function signatures verified");
+    WT_LOG_INFO("all lua function signatures verified");
     return true;
 }
 
@@ -497,7 +620,8 @@ static DWORD WINAPI InitThread(LPVOID)
     p_pushstring   = (fn_lua_pushstring)0x84E350;
     p_pushcclosure = (fn_lua_pushcclosure)0x84E400;
     p_settable     = (fn_lua_settable)0x84E8D0;
-    p_getfield     = (fn_lua_getfield)0x84E670;   // IDA 验明真身（PyWoW 表标错为 setfield）
+    p_rawget       = (fn_lua_rawget)0x84E600;     // 裸读（不走 __index）
+    p_getfield     = (fn_lua_getfield)0x84E670;   // 裸读压 1（自检/探针用）
     p_settop       = (fn_lua_settop)0x84DBF0;
     p_tolstring    = (fn_lua_tolstring)0x84E0E0;
     p_isstring     = (fn_lua_isstring)0x84DF60;
