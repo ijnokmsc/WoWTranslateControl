@@ -242,22 +242,27 @@ local function HandleIncoming(frame, orig, text, r, g, b, id, hold)
   if not curChannel or curSystem then
     return Passthrough(frame, orig, text, r, g, b, id, hold)
   end
-  -- 已含中文或纯符号/数字 → 不送翻（首次记 diag 证明捕获链路是通的）
-  if HasCJK(text) or not HasLatin(text) then
-    if not dbgCjk and HasCJK(text) then
+  -- 先剥 [频道] [玩家]: 头，正文才做语言判断与翻译（头里的中文频道名不该触发跳过）
+  local body = StripChatPrefixBody(text)
+  if body == "" then
+    return Passthrough(frame, orig, text, r, g, b, id, hold)
+  end
+  -- 正文已含中文或纯符号/数字 → 不送翻（首次记 diag 证明捕获链路是通的）
+  if HasCJK(body) or not HasLatin(body) then
+    if not dbgCjk and HasCJK(body) then
       dbgCjk = true
-      WoWTranslate_Diag("WTC_SKIP_CJK ch=" .. tostring(curChannel) .. " len=" .. tostring(string.len(text)))
+      WoWTranslate_Diag("WTC_SKIP_CJK ch=" .. tostring(curChannel) .. " body=" .. string.sub(body, 1, 60))
     end
     return Passthrough(frame, orig, text, r, g, b, id, hold)
   end
-  local segs = SplitSegs(text)
+  local segs = SplitSegs(body)
   local toSend = BuildText(segs)
   if toSend == "" then
     return Passthrough(frame, orig, text, r, g, b, id, hold)
   end
   if not dbgCapture then
     dbgCapture = true
-    -- 取证：原始 AddMessage 全文（含超链接原始字节，定位 ?频道? 之类乱码来源）
+    -- 取证：原始 AddMessage 全文（含超链接原始字节，定位乱码来源）
     WoWTranslate_Diag("WTC_RAW ch=" .. tostring(curChannel) ..
       " text=" .. string.sub(text, 1, 200))
     WoWTranslate_Diag("WTC_CAPTURE ch=" .. tostring(curChannel) ..
@@ -267,6 +272,7 @@ local function HandleIncoming(frame, orig, text, r, g, b, id, hold)
   local mid = tostring(counter)
   local both = (displayMode == "both")
   pending[mid] = { frame = frame, orig = orig, text = text, segs = segs,
+                   prefix = string.sub(text, 1, #text - #body),
                    r = r, g = g, b = b, id = id, hold = hold,
                    t = GetTime(), done = both }
   local ok = pcall(function()
@@ -283,6 +289,68 @@ local function HandleIncoming(frame, orig, text, r, g, b, id, hold)
   if both then
     orig(frame, text, r, g, b, id, hold)
   end
+end
+
+-- 移植部署版 GS 插件 v2.3 的 StripChatPrefix：剥掉行首 [频道] [玩家]: 头
+--（超链接或纯文本变体，含 |c 色码），只把正文送翻译——链接/名字进模型只会诱发
+-- 幻觉（v20 实测：模型给译文加了 ？频道? 前缀）。返回剥完后的正文，空串=无可译。
+local function StripChatPrefixBody(text)
+  if not text then return "" end
+  local t = text
+  local hadChannel = false
+  local nameConsumed = false
+  t = string.gsub(t, "^%s+", "")
+  t = string.gsub(t, "^|c%x%x%x%x%x%x%x%x", "")
+  t = string.gsub(t, "^%s+", "")
+  local t2 = string.gsub(t, "^|Hchannel:[^|]-|h.-|h", "")
+  if t2 ~= t then
+    t = t2
+    hadChannel = true
+  else
+    t2 = string.gsub(t, "^%[[^%]]-%]%s+%[[^%]]-%]%s*:%s*", "")
+    if t2 ~= t then
+      t = t2
+      hadChannel = true
+      nameConsumed = true
+    else
+      t2 = string.gsub(t, "^%[[^%]]-%]%s+[%w_%-]+%s*:%s*", "")
+      if t2 ~= t then
+        t = t2
+        hadChannel = true
+        nameConsumed = true
+      end
+    end
+  end
+  t = string.gsub(t, "^%s+", "")
+  t = string.gsub(t, "^|c%x%x%x%x%x%x%x%x", "")
+  t = string.gsub(t, "^|r", "")
+  local t3 = string.gsub(t, "^|Hplayer:[^|]-|h.-|h", "")
+  if t3 ~= t then
+    t = t3
+    nameConsumed = true
+  else
+    t3 = string.gsub(t, "^%[[^%]]-%]%s*:%s*", "")
+    if t3 ~= t then
+      t = t3
+      nameConsumed = true
+    else
+      t3 = string.gsub(t, "^%[[^%]]-%]|r%s*:%s*", "")
+      if t3 ~= t then
+        t = t3
+        nameConsumed = true
+      end
+    end
+  end
+  t = string.gsub(t, "^|r", "")
+  t = string.gsub(t, "^%s*:%s*", "")
+  -- 本客户端聊天用全角冒号 ：（UTF-8 \239\188\154；Lua 5.1 无 \xNN 转义，用十进制）
+  t = string.gsub(t, "^\239\188\154", "")
+  t = string.gsub(t, "^%s+", "")
+  if hadChannel and not nameConsumed then
+    t = string.gsub(t, "^[%w_%-]+%s*:%s*", "")
+  end
+  t = string.gsub(t, "^%s+", "")
+  return t
 end
 
 -- ---- hook 聊天框 ----
@@ -347,12 +415,12 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
         local finalText = Reconstruct(p.segs, tr)
         if not dbgDisplayed then
           dbgDisplayed = true
-          WoWTranslate_Diag("WTC_DISPLAY final=" .. string.sub(finalText, 1, 200))
+          WoWTranslate_Diag("WTC_DISPLAY final=" .. string.sub(p.prefix .. finalText, 1, 200))
         end
         if displayMode == "both" then
-          p.orig(p.frame, dispPrefix .. finalText, p.r, p.g, p.b, p.id, p.hold)
+          p.orig(p.frame, p.prefix .. dispPrefix .. finalText, p.r, p.g, p.b, p.id, p.hold)
         else
-          p.orig(p.frame, finalText, p.r, p.g, p.b, p.id, p.hold)
+          p.orig(p.frame, p.prefix .. finalText, p.r, p.g, p.b, p.id, p.hold)
         end
       end
     end
