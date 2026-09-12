@@ -16,11 +16,22 @@ public partial class SetupWizardWindow : Window
     private System.Collections.Generic.List<LlamaBuildInfo>? _builds;
     private CancellationTokenSource? _cts;
     private string? _downloadedModelFile;
+    private bool _busy;
 
     public SetupWizardWindow(AppConfig cfg)
     {
         InitializeComponent();
         _cfg = cfg;
+        // 关窗即停：下载中关闭窗口会取消下载并清理 .tmp 残留，
+        // 否则后台任务会一直占用文件，且新开的向导无法控制旧下载
+        Closing += (_, _) =>
+        {
+            if (_busy)
+            {
+                _cts?.Cancel();
+                Log("窗口已关闭：下载已停止，临时文件已清理");
+            }
+        };
         Loaded += async (_, _) => await InitializeAsync().ConfigureAwait(false);
     }
 
@@ -220,6 +231,7 @@ public partial class SetupWizardWindow : Window
 
     private void SetBusy(bool busy)
     {
+        _busy = busy;
         BtnDownloadBuild.IsEnabled = !busy;
         BtnDownloadModel.IsEnabled = !busy;
         BtnRefreshBuilds.IsEnabled = !busy;
