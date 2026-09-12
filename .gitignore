@@ -26,3 +26,5 @@ Thumbs.db
 proxy_traffic.log
 vendor/
 patches/335/build/
+
+patches/335/*.obj
