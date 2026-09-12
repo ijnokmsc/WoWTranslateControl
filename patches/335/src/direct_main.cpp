@@ -126,7 +126,7 @@ WT_NOINLINE static int L_Version(lua_State* L)
 // ---- GetLastError: () → 串 ----
 WT_NOINLINE static int L_GetLastError_impl(lua_State* L)
 {
-    return PushResult(L, wt::Utf8ToGbk(wt::Translator::Inst().GetLastErrorUtf8()));
+    return PushResult(L, wt::Translator::Inst().GetLastErrorUtf8());   // UTF-8 通道，原样透传
 }
 WT_NOINLINE static int L_GetLastError(lua_State* L)
 {
@@ -198,9 +198,11 @@ WT_NOINLINE static int L_Poll_impl(lua_State* L)
     if (!wt::Translator::Inst().Poll(id, trans, err))
         return PushResult(L, "");
 
+    // ⚠ 客户端是 UTF-8 通道（TriumvirateWoW AwesomeWotlk 补丁，用户 \ddd 字节探针实测：
+    //   UTF-8「测试」正常显示、GBK「测试」全为 ?）。控制台端点输出即 UTF-8，原样透传。
     std::string out = "{\"id\":\"" + id + "\",\"translation\":\"" +
-                      wt::JsonEscapeRaw(wt::Utf8ToGbk(trans)) +
-                      "\",\"error\":\"" + wt::JsonEscapeRaw(wt::Utf8ToGbk(err)) + "\"}";
+                      wt::JsonEscapeRaw(trans) +
+                      "\",\"error\":\"" + wt::JsonEscapeRaw(err) + "\"}";
     return PushResult(L, out);
 }
 WT_NOINLINE static int L_Poll(lua_State* L)
