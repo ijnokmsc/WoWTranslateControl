@@ -161,7 +161,7 @@ public partial class MainWindow : Window
                 // 把左栏滚到底部（用户误以为"过滤规则盖住了其他卡片"）——
                 // 全部服务就绪后滚回顶部并把焦点还给第一个按钮
                 LeftScroll.ScrollToTop();
-                BtnStartLlama.Focus();
+                TxtGameDir.Focus();
             }), DispatcherPriority.Background);
     }
 
@@ -326,6 +326,7 @@ public partial class MainWindow : Window
         {
             BtnStartLlama.IsEnabled = false;
             BtnStopLlama.IsEnabled = true;
+            KeepFocusStable();
         }
     }
 
@@ -334,6 +335,7 @@ public partial class MainWindow : Window
         _llama?.Stop();
         BtnStartLlama.IsEnabled = true;
         BtnStopLlama.IsEnabled = false;
+        KeepFocusStable();
     }
 
     private void StartProxy()
@@ -385,6 +387,7 @@ public partial class MainWindow : Window
             _proxy.Start();
             BtnStartProxy.IsEnabled = false;
             BtnStopProxy.IsEnabled = true;
+            KeepFocusStable();
             UpdateProxyDot(true);
             ProxyPortText.Text = $" :{_cfg.ListenPort} → :{_cfg.UpstreamPort}";
             // 端口回退后同步游戏目录 WoWTranslateDirect.json（DLL 端点端口 = 新监听端口）
@@ -417,6 +420,7 @@ public partial class MainWindow : Window
         try { _proxy?.Stop(); } catch { }
         BtnStartProxy.IsEnabled = true;
         BtnStopProxy.IsEnabled = false;
+        KeepFocusStable();
         UpdateProxyDot(false);
     }
 
@@ -815,6 +819,21 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// 按钮 IsEnabled 变化会迁移键盘焦点（WPF 顺链 BringIntoView 把左栏滚到底），
+    /// 统一把焦点收回到永不禁用的游戏目录输入框。
+    /// </summary>
+    private void KeepFocusStable()
+    {
+        if (System.Windows.Input.Keyboard.FocusedElement is not System.Windows.Controls.Control c)
+        {
+            TxtGameDir.Focus();
+            return;
+        }
+        if (!c.IsEnabled || c is System.Windows.Controls.Button)
+            TxtGameDir.Focus();
+    }
+
     private void OnLlamaStateChanged(LlamaState s)
     {
         Dispatcher.BeginInvoke(new Action(() =>
@@ -832,6 +851,7 @@ public partial class MainWindow : Window
 
             BtnStartLlama.IsEnabled = s is LlamaState.Stopped or LlamaState.Crashed;
             BtnStopLlama.IsEnabled = s is LlamaState.Running or LlamaState.Starting;
+            KeepFocusStable();
         }));
     }
 
