@@ -227,8 +227,6 @@
                         </StackPanel>
                     </Border>
 
-                </StackPanel>
-            </ScrollViewer>
 
             <!-- 游戏目录与部署（自动 Track B） -->
                     <Border Background="{StaticResource PanelBrush}" CornerRadius="6"
@@ -463,6 +461,9 @@
 
                             </StackPanel>
                     </Border>
+                </StackPanel>
+            </ScrollViewer>
+
 <!-- 右：标签页 -->
             <TabControl Grid.Column="1" Background="{StaticResource PanelBrush}"
                         BorderBrush="{StaticResource BorderBrush}">
