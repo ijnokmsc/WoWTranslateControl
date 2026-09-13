@@ -427,6 +427,7 @@ static volatile LONG g_registerDone = 0;
 static std::string g_displayMode   = "replace";   // "replace" | "both"
 static std::string g_displayPrefix = "[译]";      // UTF-8（客户端为 UTF-8 通道）
 static std::string g_outgoingMode  = "off";       // "off" | "replace" | "both"
+static int         g_outTimeout    = 25;        // 外发译文等待秒数
 
 static std::string g_driverChunk;                 // 配置前缀 + 驱动 Lua，RebuildDriverChunk 组装
 static HMODULE g_hSelfModule = NULL;              // 引擎自身句柄（DllMain 传入；日志/配置路径用）
@@ -443,15 +444,25 @@ static void ApplyDisplayKeys(const json& disp)
         g_outgoingMode = disp["outgoingMode"].get<std::string>();
     if (g_outgoingMode != "off" && g_outgoingMode != "replace" && g_outgoingMode != "both")
         g_outgoingMode = "off";
+    if (disp.contains("outTimeout") && disp["outTimeout"].is_number())
+        g_outTimeout = (std::max)(5, (std::min)(60, disp["outTimeout"].get<int>()));
     if (disp.contains("log") && disp["log"].is_boolean())
         wt::wtSetLogEnabled(disp["log"].get<bool>());
 }
 
 static void RebuildDriverChunk()
 {
-    g_driverChunk = std::string("WTC={displayMode='") + wt::LuaEscape(g_displayMode) +
-                    "',prefix='" + wt::LuaEscape(g_displayPrefix) +
-                    "',outgoing='" + wt::LuaEscape(g_outgoingMode) + "'}\n" +
+    // 用字符串数组拼接，避免行尾反斜杠被编辑器/工具链吞掉
+    const char* part1 = "WTC={displayMode='";
+    const char* part2 = "',prefix='";
+    const char* part3 = "',outgoing='";
+    const char* part4 = "',outTimeout=";
+    const char* part5 = "'}\n";
+    g_driverChunk = std::string(part1) + wt::LuaEscape(g_displayMode) +
+                    part2 + wt::LuaEscape(g_displayPrefix) +
+                    part3 + wt::LuaEscape(g_outgoingMode) +
+                    part4 + std::to_string(g_outTimeout) +
+                    part5 +
                     wt::DriverLuaCode();
 }
 

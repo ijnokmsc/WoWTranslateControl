@@ -68,6 +68,7 @@ local displayMode = tostring(WTC_CFG.displayMode or "replace")
 local dispPrefix = tostring(WTC_CFG.prefix or "[译]")
 -- 外发翻译：off=关闭 | replace=只发英文 | both=原文+英文都发
 local outgoingMode = tostring(WTC_CFG.outgoing or "off")
+local outTimeout = tonumber(WTC_CFG.outTimeout or 25)
 
 local pending, counter = {}, 0
 local outPending, outCounter = {}, 0
@@ -202,7 +203,7 @@ local function RegisterFilters()
       f.WTCFiltered = f.WTCFiltered or {}
       for ev in pairs(EVENTS) do
         if not f.WTCFiltered[ev] then
-          ChatFrame_AddMessageEventFilter(f, ev, WTCFilter)
+          ChatFrame_AddMessageEventFilter(ev, WTCFilter)
           f.WTCFiltered[ev] = true
           n = n + 1
         end
@@ -295,7 +296,7 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
   end
   -- 外发翻译 10s 超时：replace 模式发原文兜底（both 已发过原文）
   for oid, o in pairs(outPending) do
-    if now - o.t > 10 then
+    if now - o.t > outTimeout then
       outPending[oid] = nil
       if outgoingMode == "replace" then
         pcall(function() origSend(o.msg, o.chatType, o.language, o.channel) end)
@@ -337,10 +338,25 @@ SendChatMessage = function(msg, chatType, language, channel)
   end
 end
 
-if DEFAULT_CHAT_FRAME then
-  DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 2.1.1 by ijnokmsc (driver v28, mode=" ..
-    displayMode .. ", outgoing=" .. outgoingMode .. ")")
-end
+-- 横幅：注入常发生在加载屏阶段（消息会被后续聊天框初始化清掉），
+-- 延迟到 PLAYER_ENTERING_WORLD + 1s 后再显示，保证玩家看得到
+local bannerShown = false
+local bannerFrame = CreateFrame("Frame")
+bannerFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+bannerFrame:SetScript("OnEvent", function()
+  if bannerShown then return end
+  bannerShown = true
+  local acc = 0
+  bannerFrame:SetScript("OnUpdate", function(self, el)
+    acc = acc + el
+    if acc < 1 then return end
+    self:SetScript("OnUpdate", nil)
+    if DEFAULT_CHAT_FRAME then
+      DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 2.1.1 by ijnokmsc (driver v28, mode=" ..
+        displayMode .. ", outgoing=" .. outgoingMode .. ")")
+    end
+  end)
+end)
 
 end  -- WTC_MAIN
 
