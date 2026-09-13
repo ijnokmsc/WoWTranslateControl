@@ -289,14 +289,9 @@ local function HandleIncoming(frame, orig, text, r, g, b, id, hold)
   if body == "" then
     return Passthrough(frame, orig, text, r, g, b, id, hold)
   end
-  if HasCJK(body) or not HasLatin(body) then
-    if dbg.skip < 3 and HasCJK(body) then
-      dbg.skip = dbg.skip + 1
-      WoWTranslate_Diag("WTC_SKIP_CJK ch=" .. tostring(curChannel) ..
-        " body=" .. string.sub(body, 1, 80))
-    end
-    return Passthrough(frame, orig, text, r, g, b, id, hold)
-  end
+  -- 语言判定交由控制台 R6/R8 规则：Lua 侧文本是 GBK/UTF-8 混编
+  -- （服务器中转 GBK、本地输入 UTF-8），HasCJK 按 UTF-8 检测会误跳过
+  -- GBK 字节（v30 实测整频道消息被跳过的根因）。DLL 出站已做编码归一。
   local segs = SplitSegs(body)
   local toSend = BuildText(segs)
   if toSend == "" then

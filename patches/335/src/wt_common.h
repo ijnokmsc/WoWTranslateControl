@@ -55,6 +55,30 @@ inline std::string Utf8ToGbk(const std::string& s)
     return g;
 }
 
+// 校验字节串是否为合法 UTF-8（用于入站编码判定：非 UTF-8 视为 GBK）
+inline bool IsUtf8(const std::string& s)
+{
+    if (s.empty()) return true;
+    size_t i = 0, n = s.size();
+    while (i < n)
+    {
+        unsigned char c = (unsigned char)s[i];
+        if (c < 0x80) { ++i; continue; }
+        int extra = 0;
+        if ((c & 0xE0) == 0xC0) extra = 1;
+        else if ((c & 0xF0) == 0xE0) extra = 2;
+        else if ((c & 0xF8) == 0xF0) extra = 3;
+        else return false;
+        if (i + extra >= n) return false;
+        for (int k = 1; k <= extra; ++k)
+        {
+            if (((unsigned char)s[i + k] & 0xC0) != 0x80) return false;
+        }
+        i += extra + 1;
+    }
+    return true;
+}
+
 // ==================== JSON 字符串转义 ====================
 // 用于 Poll 结果 JSON：译文已是 GBK 裸字节，只需转义控制字符/引号/反斜杠，
 // 高位字节原样内嵌（Addon 的 JsonUnescape 对无 \u 的字节按原样拷贝 → Lua 里即为 GBK 串）。

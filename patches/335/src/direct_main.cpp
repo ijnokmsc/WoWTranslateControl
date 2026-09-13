@@ -199,6 +199,13 @@ WT_NOINLINE static int L_Translate_impl(lua_State* L)
         idStr = idBuf;
     }
 
+    // 入站编码判定：本客户端用户输入是 UTF-8，但服务器中转的其他玩家
+    // 消息/名字是 GBK——非合法 UTF-8 的输入按 GBK→UTF-8 转换（v30）
+    if (!text.empty() && !wt::IsUtf8(text))
+    {
+        text = wt::GbkToUtf8(text);
+    }
+
     std::string err;
     if (!wt::Translator::Inst().Queue(idStr, text, from, to, err))
     {
