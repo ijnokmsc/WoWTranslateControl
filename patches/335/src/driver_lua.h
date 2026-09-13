@@ -1,22 +1,11 @@
-// driver_lua.h — 内嵌驱动 Lua（v16 全自治模式）
+// driver_lua.h — 内嵌驱动 Lua（v28 过滤式捕获）
 //
-// 经 FrameScript_Execute(0x819210) 一次性注入到全局 Lua 状态，之后完全由客户端
-// 事件驱动，不再需要 Interface/AddOns 里的 WoWTranslate 插件：
-//   1. 中和旧插件：定义 UnitXP 空桩（WoWTranslate_API.CheckDLL pcall 探测
-//      UnitXP("WoWTranslate","ping")=="pong"，桩返回 nil → 旧插件整体惰性化，
-//      只显示原文，不与驱动双重翻译）。
-//   2. 捕获：hook ChatFrame1..N 的 AddMessage（保留原函数）+ hook ChatFrame_OnEvent
-//      记录当前事件频道（EVENT_TO_CHANNEL / SYSTEM_EVENTS 移植自插件 2.0）。
-//   3. 翻译：文本段+超链接占位符(http://ph.wt/N)后加 "\1<频道>\1" 标签调
-//      WoWTranslate_Translate（标签供控制台 C0-C8 频道开关）。
-//   4. 显示：隐藏帧 OnUpdate 每 0.1s 调 WoWTranslate_Poll，按 WTC.displayMode：
-//        replace —— 压住原文，译文经原始 AddMessage 原格式写回；错误/超时(30s)回显原文
-//        both    —— 原文立即照常显示，译文到达后加 WTC.prefix 另起一行追加
+// 经 FrameScript_Execute(0x819210) 一次性注入到全局 Lua 状态。
+// v28 架构：用官方 ChatFrame_AddMessageEventFilter 拦截聊天消息——任何聊天 UI
+// （巨龙UI/EUI/原生）都走这条标准链，不再依赖 AddMessage 钩子与头格式猜测。
+// filter 直接拿到纯消息正文与发送者，replace 模式 return true 压住原文。
 //
-// 编码（v15 定案）：TriumvirateWoW = AwesomeWotlk 改件，Lua 字符串是 UTF-8 字节，
-// 全程原样透传，不做任何 GBK 转换。
-//
-// ⚠ 本文件是 C++ raw string：Lua 里不得出现 )" 序列。
+// Lua 内容里的反斜杠一律用 @BS@ 类占位符由 _gen_driver2.py 生成，禁止手写。
 #pragma once
 
 #include <string>
@@ -58,9 +47,12 @@ inline std::string LuaEscape(const std::string& s)
 inline const char* DriverLuaCode()
 {
     return R"WTCDRIVER(
--- v17 就绪门禁：FrameXML 未加载完（NUM_CHAT_WINDOWS/ChatFrame1/DEFAULT_CHAT_FRAME/
--- ChatFrame_OnEvent 任一为 nil）时静默返回，C++ 侧 500ms 后重试；绝不抛 Lua 错误——
--- v16 崩溃根因之一就是注入过早导致 chunk 运行时错误。
+
+
+-- v28 过滤式捕获：用官方 ChatFrame_AddMessageEventFilter 拦截聊天消息——
+-- 任何聊天 UI（巨龙UI/EUI/原生）都走这条标准链，不再依赖 AddMessage 钩子
+-- 与头格式猜测。filter 拿到的是纯消息正文（头是显示期才拼的）。
+-- 就绪门禁：FrameXML 未加载完时静默返回，C++ 侧 500ms 后重试。
 if not WTC_DRIVER_LOADED and NUM_CHAT_WINDOWS and DEFAULT_CHAT_FRAME and ChatFrame_OnEvent and ChatFrame1 then
 WTC_DRIVER_LOADED = true
 
@@ -77,35 +69,13 @@ local dispPrefix = tostring(WTC_CFG.prefix or "[译]")
 -- 外发翻译：off=关闭 | replace=只发英文 | both=原文+英文都发
 local outgoingMode = tostring(WTC_CFG.outgoing or "off")
 
-local CHANNELS = {
-  CHAT_MSG_SAY = "SAY", CHAT_MSG_YELL = "YELL", CHAT_MSG_WHISPER = "WHISPER",
-  CHAT_MSG_PARTY = "PARTY", CHAT_MSG_GUILD = "GUILD", CHAT_MSG_OFFICER = "GUILD",
-  CHAT_MSG_RAID = "RAID", CHAT_MSG_RAID_LEADER = "RAID", CHAT_MSG_RAID_WARNING = "RAID",
-  CHAT_MSG_BATTLEGROUND = "BATTLEGROUND", CHAT_MSG_BATTLEGROUND_LEADER = "BATTLEGROUND",
-  CHAT_MSG_CHANNEL = "CHANNEL",
-}
-local SYSTEM_EVENTS = {
-  CHAT_MSG_SYSTEM = true, CHAT_MSG_EMOTE = true, CHAT_MSG_TEXT_EMOTE = true,
-  CHAT_MSG_MONSTER_SAY = true, CHAT_MSG_MONSTER_YELL = true,
-  CHAT_MSG_MONSTER_EMOTE = true, CHAT_MSG_MONSTER_WHISPER = true,
-  CHAT_MSG_CHANNEL_JOIN = true, CHAT_MSG_CHANNEL_LEAVE = true,
-  CHAT_MSG_LOOT = true, CHAT_MSG_MONEY = true, CHAT_MSG_OPENING = true,
-  CHAT_MSG_SKILL = true, CHAT_MSG_COMBAT_HONOR_GAIN = true,
-  CHAT_MSG_COMBAT_XP_GAIN = true, CHAT_MSG_COMBAT_MISC_INFO = true,
-}
-
-local curChannel, curSystem, curSender = nil, false, nil
 local pending, counter = {}, 0
 local outPending, outCounter = {}, 0
-local origSend = nil
-
--- v19 诊断旗标（各只回报一次，进 DLL 日志定位链路断点）
-local dbgHooked, dbgCapture, dbgCjk = false, 0, 0   -- dbgCapture/dbgCjk 是计数器   -- dbgCjk 是计数器（false 无法比较）
-local dbgQueueErr, dbgTransOk, dbgTransErr, dbgTimeout, dbgDisplayed = false, false, false, false, false
-local dbgOutOk, dbgOutErr, dbgOutSkip = false, false, false
+local origSend = SendChatMessage
+local dbg = { hooked = 0, raw = 0, skip = 0, qerr = 0, ok = 0, terr = 0, to = 0, oto = 0 }
 
 local function HasLatin(t)
-  return string.find(t, "%a") ~= nil
+  return string.find(t, "\a") ~= nil
 end
 
 -- UTF-8 CJK 检测：CJK 统一表意区 U+4E00..U+9FFF 的首字节落在 0xE4..0xE9
@@ -117,90 +87,16 @@ local function HasCJK(t)
   return false
 end
 
--- 超链接查找：|cXXXXXXXX? |H<id>|h[<显示文本>]|h |r?
-local function FindAllLinks(text)
-  local links = {}
-  local pos = 1
-  local n = string.len(text)
-  while pos <= n do
-    local h1, h2 = string.find(text, "|H", pos, true)
-    if not h1 then break end
-    local start = h1
-    local c1, c2 = string.find(text, "|c%x%x%x%x%x%x%x%x", pos)
-    if c1 and c2 + 1 == h1 then start = c1 end
-    local d1 = string.find(text, "|h[", h2 + 1, true)
-    if not d1 then
-      pos = h2 + 1
-    else
-      local d2 = string.find(text, "%]|h", d1 + 3)
-      if not d2 then
-        pos = h2 + 1
-      else
-        local e = d2 + 2
-        if string.sub(text, e + 1, e + 2) == "|r" then e = e + 2 end
-        table.insert(links, { s = start, e = e, c = string.sub(text, start, e) })
-        pos = e + 1
-      end
-    end
-  end
-  return links
-end
+-- 消息事件 → 频道标签（供控制台 C0-C8 频道开关与方向路由）
+local EVENTS = {
+  CHAT_MSG_SAY = "SAY", CHAT_MSG_YELL = "YELL", CHAT_MSG_WHISPER = "WHISPER",
+  CHAT_MSG_PARTY = "PARTY", CHAT_MSG_PARTY_LEADER = "PARTY",
+  CHAT_MSG_GUILD = "GUILD", CHAT_MSG_OFFICER = "GUILD",
+  CHAT_MSG_RAID = "RAID", CHAT_MSG_RAID_LEADER = "RAID", CHAT_MSG_RAID_WARNING = "RAID",
+  CHAT_MSG_BATTLEGROUND = "BATTLEGROUND", CHAT_MSG_BATTLEGROUND_LEADER = "BATTLEGROUND",
+  CHAT_MSG_CHANNEL = "CHANNEL",
+}
 
-local function SplitSegs(text)
-  local links = FindAllLinks(text)
-  local segs = {}
-  if table.getn(links) == 0 then
-    table.insert(segs, { t = "text", c = text })
-    return segs
-  end
-  local last = 0
-  for _, l in ipairs(links) do
-    if l.s > last + 1 then
-      table.insert(segs, { t = "text", c = string.sub(text, last + 1, l.s - 1) })
-    end
-    table.insert(segs, { t = "link", c = l.c })
-    last = l.e
-  end
-  if last < string.len(text) then
-    table.insert(segs, { t = "text", c = string.sub(text, last + 1) })
-  end
-  return segs
-end
-
-local function BuildText(segs)
-  local parts, n = {}, 0
-  for _, s in ipairs(segs) do
-    if s.t == "text" then
-      table.insert(parts, s.c)
-    else
-      n = n + 1
-      table.insert(parts, "http://ph.wt/" .. n)
-    end
-  end
-  return table.concat(parts, "")
-end
-
-local function Reconstruct(segs, translated)
-  local links = {}
-  for _, s in ipairs(segs) do
-    if s.t == "link" then table.insert(links, s.c) end
-  end
-  if table.getn(links) == 0 then return translated end
-  for i = 1, table.getn(links) do
-    local phs = { "http://ph.wt/" .. i, "https://ph.wt/" .. i,
-                  "http://ph .wt/" .. i, "http: //ph.wt/" .. i }
-    for _, p in ipairs(phs) do
-      local a, b = string.find(translated, p, 1, true)
-      if a then
-        translated = string.sub(translated, 1, a - 1) .. links[i] .. string.sub(translated, b + 1)
-        break
-      end
-    end
-  end
-  return translated
-end
-)WTCDRIVER"
-R"WTCDRIVER(
 -- DLL Poll 返回 {"id":"..","translation":"..","error":".."} 的最小 JSON 字符串读取
 local function JsonGetString(json, key)
   if not json or not key then return nil end
@@ -220,18 +116,17 @@ local function JsonGetString(json, key)
     local ch = string.sub(json, j, j)
     if ch == "\\" and j < string.len(json) then
       local nc = string.sub(json, j + 1, j + 1)
-      if nc == "\"" then out = out .. "\""
+      if nc == "\\" then out = out .. "\\"
       elseif nc == "\\" then out = out .. "\\"
       elseif nc == "/" then out = out .. "/"
       elseif nc == "n" then out = out .. "\n"
       elseif nc == "r" then out = out .. "\r"
       elseif nc == "t" then out = out .. "\t"
       elseif nc == "u" then
-        -- \uXXXX → UTF-8 裸字节（纵深防御：即使服务端转义也能正确显示，v23 前是丢弃成 ?）
+        -- \uXXXX → UTF-8 裸字节（纵深防御）
         local cp = tonumber(string.sub(json, j + 2, j + 5), 16)
         if cp and cp >= 32 then
-          if cp < 0x80 then
-            out = out .. string.char(cp)
+          if cp < 0x80 then out = out .. string.char(cp)
           elseif cp < 0x800 then
             out = out .. string.char(0xC0 + math.floor(cp / 64), 0x80 + cp % 64)
           else
@@ -251,186 +146,174 @@ local function JsonGetString(json, key)
   end
   return out
 end
-)WTCDRIVER"
-R"WTCDRIVER(
--- 移植部署版 GS 插件 v2.3 的 StripChatPrefix：剥掉行首 [频道] [玩家]: 头
---（超链接或纯文本变体，含 |c 色码），只把正文送翻译——链接/名字进模型只会诱发
--- 幻觉（v20 实测：模型给译文加了 ？频道? 前缀）。返回剥完后的正文，空串=无可译。
--- ⚠ 必须定义在 HandleIncoming 之前：local 函数定义顺序=可见性（v22 曾因放后面
---   在 HandleIncoming 里落空成全局 nil，游戏内报 attempt to call global）。
-local function StripChatPrefixBody(text)
-  if not text then return "", "" end
-  -- 全角冒号归一化：zhCN 聊天格式用 ：，统一成 : 后所有模式可复用
-  local w = string.gsub(text, "：" , ":")
-  local header = ""            -- 被剥离的头部件原样累积，显示时拼回译文前
-  local hadChannel = false
-  local nameConsumed = false
 
-  -- 逐段消费头部：每段消费到的原文都累积进 header
-  local function consume(pat)
-    local out, n = string.gsub(w, pat, function(m)
-      header = header .. m
-      return ""
-    end)
-    if n > 0 then w = out end
-    return n > 0
-  end
-
-  -- 发送者锚定剥离（最精确，任意聊天 UI 格式通用）：事件参数给出对方 ID，
-  -- 在头部定位 "[ID" 到其后的 "]"，连同 |r/冒号/空白 一并剥离。
-  -- 失败时回落到通用模式链
-  if curSender and curSender ~= "" then
-    local p1 = string.find(w, "[" .. curSender, 1, true)
-    if p1 and (p1 == 1 or p1 <= 16) then
-      local e1 = string.find(w, "]", p1, true)
-      if e1 then
-        header = header .. string.sub(w, 1, e1)
-        w = string.sub(w, e1 + 1)
-        w = string.gsub(w, "^|r", "")
-        w = string.gsub(w, "^%s*:%s*", "")
-        nameConsumed = true
-      end
+-- ---- 消息过滤器（捕获入口）----
+-- 约定：replace 模式 return true 压住原文；both 模式 return false 放行原文；
+-- 送翻失败（队列满/未配置）也放行，绝不吞消息。
+local function WTCFilter(chatFrame, event, msg, sender, ...)
+  local ch = EVENTS[event]
+  if not ch or not msg or msg == "" then return false end
+  -- 自己的消息回显不处理（外发英文回显防重翻）
+  local me = UnitName and UnitName("player")
+  if me and me ~= "" and sender == me then return false end
+  -- 已含中文或纯符号/数字 → 不送翻
+  if HasCJK(msg) or not HasLatin(msg) then
+    if dbg.skip < 3 and HasCJK(msg) then
+      dbg.skip = dbg.skip + 1
+      WoWTranslate_Diag("WTC_SKIP_CJK ch=" .. ch .. " body=" .. string.sub(msg, 1, 60))
     end
+    return false
   end
-  for _ = 1, 8 do
-    local before = #w
-    consume("^%s+")
-    consume("^|c%x%x%x%x%x%x%x%x")
-    consume("^%s+")
-    if consume("^|Hchannel:[^|]-|h.-|h") then hadChannel = true end
-    if consume("^%[[^%]]-%]%s+%[[^%]]-%]%s*:%s*") then hadChannel = true; nameConsumed = true end
-    if consume("^%[[^%]]-%]%s+[%w_%-]+%s*:%s*") then hadChannel = true; nameConsumed = true end
-    if consume("^|Hplayer:[^|]-|h.-|h") then nameConsumed = true end
-    if consume("^%[[^%]]-%]%s*:%s*") then nameConsumed = true end
-    if consume("^%[[^%]]-%]|r%s*:%s*") then nameConsumed = true end
-    consume("^|r")
-    consume("^%s*:%s*")
-    if hadChannel and not nameConsumed then
-      if consume("^[%w_%-]+%s*:%s*") then nameConsumed = true end
-    end
-    if #w == before then break end   -- 无进展 = 头部剥完
-  end
-
-  -- zhCN 动词前缀（"说：/大喊：/密语："…）：名字剥掉后残留的纯中文短前缀+冒号。
-  -- 限定"纯中文且 <=12 字节"——含 ASCII 的正文（如 hello:world）绝不误伤；
-  -- 动词连同冒号归入 header（显示时与原文观感一致）
-  if nameConsumed then
-    local frag, rest = string.match(w, "^(.-)(:.*)$")
-    if frag and rest and #frag <= 12 and frag ~= "" and not string.find(frag, "[a-zA-Z0-9]") then
-      header = header .. frag .. ":"
-      w = string.gsub(rest, "^%s+", "")
-    end
-  end
-  w = string.gsub(w, "^%s+", "")
-
-  local body = w
-  return body, header
-end
-
-local function Passthrough(frame, orig, text, r, g, b, id, hold)
-  return orig(frame, text, r, g, b, id, hold)
-end
-
-local function HandleIncoming(frame, orig, text, r, g, b, id, hold)
-  if not text then return Passthrough(frame, orig, text, r, g, b, id, hold) end
-  if not curChannel or curSystem then
-    return Passthrough(frame, orig, text, r, g, b, id, hold)
-  end
-  -- 自己发出的消息回显不翻（外发英文译文回显时防 EN→ZH 重翻绕一圈）
-  if UnitName and UnitName("player") then
-    local me = UnitName("player")
-    if me and me ~= "" and string.find(text, "|Hplayer:" .. me .. ":", 1, true) then
-      return Passthrough(frame, orig, text, r, g, b, id, hold)
-    end
-  end
-  -- 先剥 [频道] [玩家]: 头，正文才做语言判断与翻译（头里的中文频道名不该触发跳过）
-  local body, prefix = StripChatPrefixBody(text)
-  if body == "" then
-    return Passthrough(frame, orig, text, r, g, b, id, hold)
-  end
-  -- 正文已含中文或纯符号/数字 → 不送翻（首次记 diag 证明捕获链路是通的）
-  if HasCJK(body) or not HasLatin(body) then
-    if dbgCjk < 3 then
-      dbgCjk = dbgCjk + 1
-      WoWTranslate_Diag("WTC_SKIP_CJK ch=" .. tostring(curChannel) .. " body=" .. string.sub(body, 1, 80))
-    end
-    return Passthrough(frame, orig, text, r, g, b, id, hold)
-  end
-  local segs = SplitSegs(body)
-  local toSend = BuildText(segs)
-  if toSend == "" then
-    return Passthrough(frame, orig, text, r, g, b, id, hold)
-  end
-  if dbgCapture < 10 then
-    dbgCapture = dbgCapture + 1
-    -- 取证：原始 AddMessage 全文（含超链接原始字节，定位各聊天 UI 格式问题）
-    WoWTranslate_Diag("WTC_RAW #" .. dbgCapture .. " ch=" .. tostring(curChannel) ..
-      " text=" .. string.sub(text, 1, 200))
-    WoWTranslate_Diag("WTC_CAPTURE #" .. dbgCapture .. " ch=" .. tostring(curChannel) ..
-      " send=" .. string.sub(toSend, 1, 60))
+  if dbg.raw < 10 then
+    dbg.raw = dbg.raw + 1
+    WoWTranslate_Diag("WTC_RAW #" .. dbg.raw .. " ch=" .. ch ..
+      " sender=" .. tostring(sender) .. " text=" .. string.sub(msg, 1, 160))
   end
   counter = counter + 1
-  local mid = tostring(counter)
+  local mid = "m" .. counter
   local both = (displayMode == "both")
-  pending[mid] = { frame = frame, orig = orig, text = text, segs = segs,
-                   prefix = prefix,
-                   r = r, g = g, b = b, id = id, hold = hold,
+  local ci = ChatTypeInfo[string.sub(event, 10)]
+  pending[mid] = { frame = chatFrame, sender = tostring(sender or ""),
+                   text = msg, r = ci and ci.r, g = ci and ci.g, b = ci and ci.b,
                    t = GetTime(), done = both }
   local ok = pcall(function()
-    local r = WoWTranslate_Translate("\1" .. curChannel .. "\1" .. toSend, "en", "zh", mid)
+    local r = WoWTranslate_Translate("\1" .. ch .. "\1" .. msg, "en", "zh", mid)
     if r ~= "ok" then
       WoWTranslate_Diag("WTC_QUEUERR " .. tostring(r))
     end
   end)
   if not ok then
     pending[mid] = nil
-    return Passthrough(frame, orig, text, r, g, b, id, hold)
+    return false
   end
   if both then
-    orig(frame, text, r, g, b, id, hold)
+    return false   -- 原文照常显示，译文随后追加
   end
+  return true       -- replace 模式：压住原文，译文到达后显示
 end
 
-)WTCDRIVER"
-R"WTCDRIVER(
--- ---- hook 聊天框 ----
-local hookedCount = 0
-for i = 1, NUM_CHAT_WINDOWS do
-  local f = getglobal("ChatFrame" .. i)
-  if f and f.AddMessage and not f.WTCDirectHooked then
-    f.WTCDirectHooked = true
-    hookedCount = hookedCount + 1
-    local orig = f.AddMessage
-    f.AddMessage = function(self, text, r, g, b, id, hold)
-      HandleIncoming(self, orig, text, r, g, b, id, hold)
+-- ---- 注册过滤器到所有聊天框（新聊天框由轮询补挂）----
+local filterCount = 0
+local function RegisterFilters()
+  local n = 0
+  for i = 1, NUM_CHAT_WINDOWS do
+    local f = getglobal("ChatFrame" .. i)
+    if f then
+      f.WTCFiltered = f.WTCFiltered or {}
+      for ev in pairs(EVENTS) do
+        if not f.WTCFiltered[ev] then
+          ChatFrame_AddMessageEventFilter(f, ev, WTCFilter)
+          f.WTCFiltered[ev] = true
+          n = n + 1
+        end
+      end
     end
   end
+  if n > 0 then
+    filterCount = filterCount + n
+    WoWTranslate_Diag("WTC_FILTERS +" .. n .. " (total=" .. filterCount .. ")")
+  end
 end
-WoWTranslate_Diag("WTC_HOOKED windows=" .. tostring(NUM_CHAT_WINDOWS) .. " hooked=" .. tostring(hookedCount))
+RegisterFilters()
 
--- ---- hook ChatFrame_OnEvent 记录频道（AddMessage 都发生在 origOnEvent 内部）----
--- ⚠ 本客户端（3.3.5 AwesomeWotlk，与部署的 GS 插件 v2.3 一致）：以 (self, event, ...)
--- 调用——vendor 1.12 版签名 function(event) 曾致 event=聊天框对象 → 频道永远 nil →
--- 驱动加载成功但零捕获（v19 实测症状）。
-local origOnEvent = ChatFrame_OnEvent
-ChatFrame_OnEvent = function(self, event, ...)
-  curChannel = CHANNELS[event]
-  curSender = (select(2, ...)) or nil   -- CHAT_MSG_* 第 2 参 = 发送者名
-  curSystem = SYSTEM_EVENTS[event] == true
-  local res = origOnEvent(self, event, ...)
-  curChannel = nil
-  curSender = nil
-  curSystem = false
-  return res
-end
+-- ---- 轮询帧：Poll 译文 + 超时兜底 + 新聊天框补挂 ----
+local pollAcc = 0
+local rehookAcc = 0
+local pollFrame = CreateFrame("Frame")
+pollFrame:SetScript("OnUpdate", function(self, elapsed)
+  pollAcc = pollAcc + elapsed
+  if pollAcc < 0.1 then return end
+  pollAcc = 0
 
--- ---- hook SendChatMessage：外发中文 → 英文（\1ZH2EN\1 标签走控制台方向路由）----
+  rehookAcc = rehookAcc + elapsed
+  if rehookAcc > 3 then
+    rehookAcc = 0
+    RegisterFilters()
+  end
+
+  for _ = 1, 16 do
+    local ok, j = pcall(WoWTranslate_Poll)
+    if not ok or not j or j == "" then break end
+    local id = JsonGetString(j, "id")
+    local tr = JsonGetString(j, "translation") or ""
+    local er = JsonGetString(j, "error") or ""
+    local p = id and pending[id] or nil
+    if p and not p.done then
+      p.done = true
+      pending[id] = nil
+      if er ~= "" then
+        dbg.terr = dbg.terr + 1
+        WoWTranslate_Diag("WTC_TRANSERR id=" .. id .. " err=" .. string.sub(er, 1, 80))
+        if p.r then
+          p.frame:AddMessage(p.text, p.r, p.g, p.b)
+        else
+          p.frame:AddMessage(p.text)
+        end
+      else
+        dbg.ok = dbg.ok + 1
+        if dbg.ok <= 3 then
+          WoWTranslate_Diag("WTC_TRANSOK id=" .. id)
+        end
+        local line = ""
+        if p.sender ~= "" then
+          line = "|Hplayer:" .. p.sender .. "|h[" .. p.sender .. "]|h： "
+        end
+        line = line .. tr
+        if displayMode == "both" then
+          if p.r then
+            p.frame:AddMessage(dispPrefix .. tr, p.r, p.g, p.b)
+          else
+            p.frame:AddMessage(dispPrefix .. tr)
+          end
+        else
+          if p.r then
+            p.frame:AddMessage(line, p.r, p.g, p.b)
+          else
+            p.frame:AddMessage(line)
+          end
+        end
+      end
+    end
+  end
+
+  local now = GetTime()
+  for mid, p in pairs(pending) do
+    if now - p.t > 30 then
+      pending[mid] = nil
+      dbg.to = dbg.to + 1
+      if dbg.to <= 3 then
+        WoWTranslate_Diag("WTC_TIMEOUT id=" .. mid)
+      end
+      if displayMode ~= "both" then
+        if p.r then
+          p.frame:AddMessage(p.text, p.r, p.g, p.b)
+        else
+          p.frame:AddMessage(p.text)
+        end
+      end
+    end
+  end
+  -- 外发翻译 10s 超时：replace 模式发原文兜底（both 已发过原文）
+  for oid, o in pairs(outPending) do
+    if now - o.t > 10 then
+      outPending[oid] = nil
+      if outgoingMode == "replace" then
+        pcall(function() origSend(o.msg, o.chatType, o.language, o.channel) end)
+      end
+      dbg.oto = dbg.oto + 1
+      if dbg.oto <= 3 then
+        WoWTranslate_Diag("WTC_OUTTIMEOUT id=" .. oid)
+      end
+    end
+  end
+end)
+
+-- ---- 外发翻译：钩 SendChatMessage，中文 → 英文（\1ZH2EN\1 标签）----
 local OUT_TYPES = {
   SAY = true, YELL = true, WHISPER = true, PARTY = true, GUILD = true,
   OFFICER = true, RAID = true, RAID_WARNING = true, BATTLEGROUND = true,
   CHANNEL = true,
 }
-origSend = SendChatMessage
 SendChatMessage = function(msg, chatType, language, channel)
   if outgoingMode == "off" or not msg or msg == "" or not HasCJK(msg)
     or not chatType or not OUT_TYPES[chatType] then
@@ -447,126 +330,22 @@ SendChatMessage = function(msg, chatType, language, channel)
     outPending[oid] = nil
     return origSend(msg, chatType, language, channel)
   end
-  if not dbgOutSkip then
-    dbgOutSkip = true
-    WoWTranslate_Diag("WTC_OUTCAPTURE mode=" .. outgoingMode)
-  end
   if outgoingMode == "both" then
-    origSend(msg, chatType, language, channel)   -- 原文立即发出，英文随后
+    origSend(msg, chatType, language, channel)
   end
-  -- replace 模式：压住不发，等译文（10s 超时发原文，见轮询循环）
 end
 
--- ---- 轮询帧：Poll 译文 + 30s 超时兜底 ----
-local pollAcc = 0
-  local rehookAcc = 0
-local pollFrame = CreateFrame("Frame")
-pollFrame:SetScript("OnUpdate", function(self, elapsed)
-  pollAcc = pollAcc + elapsed
-  if pollAcc < 0.1 then return end
-  pollAcc = 0
-  rehookAcc = rehookAcc + elapsed
-  if rehookAcc > 3 then
-    rehookAcc = 0
-    for i = 1, NUM_CHAT_WINDOWS do
-      local f = getglobal("ChatFrame" .. i)
-      if f and f.AddMessage and not f.WTCDirectHooked then
-        f.WTCDirectHooked = true
-        hookedCount = hookedCount + 1
-        local orig = f.AddMessage
-        f.AddMessage = function(self, text, r, g, b, id, hold)
-          HandleIncoming(self, orig, text, r, g, b, id, hold)
-        end
-        WoWTranslate_Diag("WTC_REHOOK " .. (f:GetName() or "?"))
-      end
-    end
-  end
-  for _ = 1, 16 do
-    local ok, j = pcall(WoWTranslate_Poll)
-    if not ok or not j or j == "" then break end
-    local id = JsonGetString(j, "id")
-    local tr = JsonGetString(j, "translation") or ""
-    local er = JsonGetString(j, "error") or ""
-    -- 外发翻译结果（out_N id）：replace 模式在此刻补发英文
-    if id and string.sub(id, 1, 4) == "out_" then
-      local o = outPending[id]
-      if o then
-        outPending[id] = nil
-        local sendText = o.msg
-        if er == "" and tr ~= "" then sendText = tr end
-        pcall(function() origSend(sendText, o.chatType, o.language, o.channel) end)
-        if not dbgOutOk then
-          dbgOutOk = true
-          WoWTranslate_Diag("WTC_OUTOK id=" .. id .. " send=" .. string.sub(sendText, 1, 60))
-        end
-      end
-    else
-      local p = id and pending[id] or nil
-      if p and not p.done then
-      p.done = true
-      pending[id] = nil
-      if er ~= "" then
-        WoWTranslate_Diag("WTC_TRANSERR id=" .. id .. " err=" .. string.sub(er, 1, 80))
-        if displayMode ~= "both" then
-          p.orig(p.frame, p.text, p.r, p.g, p.b, p.id, p.hold)
-        end
-      else
-        if not dbgTransOk then
-          dbgTransOk = true
-          WoWTranslate_Diag("WTC_TRANSOK id=" .. id)
-        end
-        local finalText = Reconstruct(p.segs, tr)
-        if not dbgDisplayed then
-          dbgDisplayed = true
-          WoWTranslate_Diag("WTC_DISPLAY final=" .. string.sub(p.prefix .. finalText, 1, 200))
-        end
-        if displayMode == "both" then
-          p.orig(p.frame, p.prefix .. dispPrefix .. finalText, p.r, p.g, p.b, p.id, p.hold)
-        else
-          p.orig(p.frame, p.prefix .. finalText, p.r, p.g, p.b, p.id, p.hold)
-        end
-      end
-      end
-    end
-  end
-  local now = GetTime()
-  for mid, p in pairs(pending) do
-    if now - p.t > 30 then
-      pending[mid] = nil
-      if not p.done then
-        WoWTranslate_Diag("WTC_TIMEOUT id=" .. mid .. " (translation never returned)")
-        p.orig(p.frame, p.text, p.r, p.g, p.b, p.id, p.hold)
-      end
-    end
-  end
-  -- 外发翻译 10s 超时：replace 模式发原文兜底（both 已发过原文，直接丢弃）
-  for oid, o in pairs(outPending) do
-    if now - o.t > 10 then
-      outPending[oid] = nil
-      if outgoingMode == "replace" then
-        pcall(function() origSend(o.msg, o.chatType, o.language, o.channel) end)
-      end
-      if not dbgOutErr then
-        dbgOutErr = true
-        WoWTranslate_Diag("WTC_OUTTIMEOUT id=" .. oid)
-      end
-    end
-  end
-end)
-
-DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 2.1.1 by ijnokmsc loaded (mode=" ..
-  displayMode .. (displayMode == "both" and (", prefix=" .. dispPrefix) or "") ..
-  ", outgoing=" .. outgoingMode .. ")")
+if DEFAULT_CHAT_FRAME then
+  DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 2.1.1 by ijnokmsc (driver v28, mode=" ..
+    displayMode .. ", outgoing=" .. outgoingMode .. ")")
+end
 
 end  -- WTC_MAIN
 
--- pcall 包裹：任何 Lua 错误都被限制在本 chunk 内（错误消息经合法 chunkname 格式化，
--- 客户端栈保持平衡），结果经 Diag 回报 C++（决定重试还是完成）
 local ok, err = pcall(WTC_MAIN)
 WoWTranslate_Diag(ok and "WTC_DRIVER_OK" or ("WTC_DRIVER_FAIL: " .. tostring(err)))
 
 end
 )WTCDRIVER";
 }
-
 } // namespace wt
