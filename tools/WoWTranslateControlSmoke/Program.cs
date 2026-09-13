@@ -112,7 +112,7 @@ internal static class Program
             "ChkChanWorld", "ChkChanUntagged");
         Expect(w, errors, "TxtGameDir", "BtnConfigurePlugin", "BtnWizard", "TxtPluginReport");
         // DLL 轨道切换卡（ADR-007）+ 托盘开关 + Track B 显示模式（v16 全自治驱动）
-        Expect(w, errors, "CmbDllTrack", "BtnSwitchDll", "BtnRefreshDll", "TxtDllStatus", "ChkTray",
+        Expect(w, errors, "BtnRefreshDll", "TxtDllStatus", "TxtGameDirStatus", "ChkTray",
             "CmbDirectDisplay", "TxtDirectPrefix", "CmbDirectOutgoing");
         var dispMode = FindByName<System.Windows.Controls.ComboBox>(w, "CmbDirectDisplay");
         if (dispMode != null && dispMode.Items.Count != 2)
@@ -303,7 +303,7 @@ internal static class Program
             SaveWindowShot(w, path);
 
             // 左栏滚动区底部的 DLL 轨道切换卡单独渲染（主截图视口截不到）
-            var dllCard = FindByName<System.Windows.FrameworkElement>(w, "CmbDllTrack");
+            var dllCard = FindByName<System.Windows.FrameworkElement>(w, "BtnRefreshDll");
             if (dllCard != null)
             {
                 var parent = System.Windows.Media.VisualTreeHelper.GetParent(dllCard);

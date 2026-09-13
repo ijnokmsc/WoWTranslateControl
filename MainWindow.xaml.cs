@@ -139,6 +139,7 @@ public partial class MainWindow : Window
                      TxtGameDir.Text.Trim(),
                      System.IO.Path.Combine(AppContext.BaseDirectory, "assets", "direct-dll")))
             Log(l);
+        if (ValidateGameDir(true)) AutoDeployTrackB();
 
         if (_cfg.AutoStartLlama || _cfg.ProxyAutoStart)
             Dispatcher.BeginInvoke(new Action(() =>
@@ -238,9 +239,6 @@ public partial class MainWindow : Window
         // 托盘与 DLL 轨道
         ChkTray.IsChecked = _cfg.MinimizeToTray;
         ChkFileLog.IsChecked = _cfg.WriteFileLog;
-        foreach (System.Windows.Controls.ComboBoxItem item in CmbDllTrack.Items)
-            if ((string)item.Tag == _cfg.PluginTrack) { CmbDllTrack.SelectedItem = item; break; }
-
         // Track B 显示模式（v16 全自治驱动）
         foreach (System.Windows.Controls.ComboBoxItem item in CmbDirectDisplay.Items)
             if ((string)item.Tag == _cfg.DirectDisplayMode) { CmbDirectDisplay.SelectedItem = item; break; }
@@ -946,16 +944,6 @@ public partial class MainWindow : Window
 
     private Core.DllSwitcher.SwitchStatus? _lastDllStatus;
 
-    private void CmbDllTrack_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
-    {
-        if (!IsLoaded) return;
-        _cfg.PluginTrack = CmbDllTrack.SelectedItem is System.Windows.Controls.ComboBoxItem item
-            ? (string)item.Tag : "gs";
-        _cfg.Save();
-        // 用户手动改选目标轨道时，必须重算切换按钮的可用状态
-        UpdateSwitchButton();
-    }
-
     private void BtnRefreshDll_Click(object sender, RoutedEventArgs e) => RefreshDllStatus();
 
     private void RefreshDllStatus()
@@ -969,11 +957,6 @@ public partial class MainWindow : Window
             _lastDllStatus = status;
             TxtDllStatus.Text = $"当前：{status.CurrentText}\n" + string.Join("\n", status.Details);
 
-            // 刷新语义 = 显示当前实际轨道（会触发 SelectionChanged，幂等无害）
-            foreach (System.Windows.Controls.ComboBoxItem item in CmbDllTrack.Items)
-                if ((string)item.Tag == status.Current) { CmbDllTrack.SelectedItem = item; break; }
-
-            UpdateSwitchButton();
             UpdateDirectConfigHint();
         }
         catch (Exception ex)
@@ -982,41 +965,24 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>按「当前轨道 vs 下拉框选中的目标轨道 + 资产就绪」重算切换按钮。</summary>
-    private void UpdateSwitchButton()
+    private void BtnTrackGs_Click(object sender, RoutedEventArgs e)
     {
-        if (BtnSwitchDll == null || _lastDllStatus == null) return;
-        var target = CmbDllTrack.SelectedItem is System.Windows.Controls.ComboBoxItem sel
-            ? (string)sel.Tag : "gs";
-        BtnSwitchDll.IsEnabled = _lastDllStatus.Current != target &&
-            !(target == Core.DllSwitcher.TrackDirect && !_lastDllStatus.DirectAssetsReady);
-        // 资产未就绪时给出明确提示，避免「灰但不知道为什么」
-        if (target == Core.DllSwitcher.TrackDirect && !_lastDllStatus.DirectAssetsReady)
-        {
-            TxtDllStatus.Text += "\n⚠ Track B 不可选：未找到 Direct DLL 资产（控制台 assets\\direct-dll 或游戏目录 wtc_direct_dll）";
-        }
-    }
-
-    private void BtnSwitchDll_Click(object sender, RoutedEventArgs e)
-    {
-        if (CmbDllTrack.SelectedItem is not System.Windows.Controls.ComboBoxItem item)
+        if (MessageBox.Show(this, "GS 插件轨道仅作备用回退（一般用户无需切换）。确定切回 GS 轨道？",
+                "切换轨道", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
-        var target = (string)item.Tag;
         var gameDir = TxtGameDir.Text.Trim();
         _cfg.GameDir = gameDir;
         _cfg.Save();
-
         var assets = System.IO.Path.Combine(AppContext.BaseDirectory, "assets", "direct-dll");
-        var lines = Core.DllSwitcher.SwitchTo(gameDir, target, assets,
-            listenPort: _cfg.ListenPort,
-            displayMode: _cfg.DirectDisplayMode,
-            displayPrefix: _cfg.DirectDisplayPrefix,
-            outgoingMode: _cfg.DirectOutgoingMode);
-        TxtPluginReport.Text = string.Join("\n", lines);
+        var lines = Core.DllSwitcher.SwitchTo(gameDir, Core.DllSwitcher.TrackGs, assets,
+            listenPort: _cfg.ListenPort);
         foreach (var line in lines) Log(line);
-        MessageBox.Show(this, string.Join("\n", lines), "DLL 轨道切换",
-            MessageBoxButton.OK,
-            lines[^1].StartsWith("✅") ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        RefreshDllStatus();
+    }
+
+    private void BtnTrackDirect_Click(object sender, RoutedEventArgs e)
+    {
+        AutoDeployTrackB();
         RefreshDllStatus();
     }
 
@@ -1099,6 +1065,55 @@ public partial class MainWindow : Window
         if (prefix == _cfg.DirectDisplayPrefix) return;
         _cfg.DirectDisplayPrefix = prefix;
         SyncDirectConfigToGameDir();
+    }
+
+    // ==================== 游戏目录校验 + 自动部署 ====================
+
+    /// <summary>校验游戏根目录：Wow.exe 与 Data 必需，Interface 缺失仅提示。</summary>
+    private bool ValidateGameDir(bool report)
+    {
+        var dir = TxtGameDir.Text.Trim();
+        string status;
+        var ok = false;
+        if (dir.Length == 0) status = "⚠ 未填写游戏目录——填写后自动部署翻译 DLL";
+        else if (!Directory.Exists(dir)) status = "⚠ 目录不存在：" + dir;
+        else if (!File.Exists(Path.Combine(dir, "Wow.exe"))) status = "⚠ 未找到 Wow.exe——请填客户端根目录";
+        else if (!Directory.Exists(Path.Combine(dir, "Data"))) status = "⚠ 未找到 Data 文件夹——该目录不是 3.3.5 客户端根目录";
+        else if (!Directory.Exists(Path.Combine(dir, "Interface")))
+        { status = "✔ 游戏目录有效（Interface 尚未生成，进一次游戏即可）"; ok = true; }
+        else { status = "✔ 游戏目录有效"; ok = true; }
+        if (report) TxtGameDirStatus.Text = status;
+        return ok;
+    }
+
+    private void TxtGameDir_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        _cfg.GameDir = TxtGameDir.Text.Trim();
+        _cfg.Save();
+        var ok = ValidateGameDir(true);
+        RefreshDllStatus();
+        if (ok) AutoDeployTrackB();
+    }
+
+    /// <summary>游戏目录有效时自动部署主推轨道 B（用户无需选择轨道）。</summary>
+    private void AutoDeployTrackB()
+    {
+        try
+        {
+            var gameDir = TxtGameDir.Text.Trim();
+            if (!Directory.Exists(gameDir)) return;
+            var assets = System.IO.Path.Combine(AppContext.BaseDirectory, "assets", "direct-dll");
+            var lines = Core.DllSwitcher.EnsureDeployed(gameDir, assets,
+                _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix, _cfg.DirectOutgoingMode,
+                listenPort: _cfg.ListenPort);
+            foreach (var l in lines) Log(l);
+            RefreshDllStatus();
+        }
+        catch (Exception ex)
+        {
+            Log("自动部署失败：" + ex.Message);
+        }
     }
 
     private void ChkFileLog_Changed(object sender, RoutedEventArgs e)

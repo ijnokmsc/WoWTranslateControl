@@ -152,64 +152,12 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- 过滤规则 -->
-                    <Border Background="{StaticResource PanelBrush}" CornerRadius="6"
+                    <!-- 按频道过滤（C0-C8） -->
+<Border Background="{StaticResource PanelBrush}" CornerRadius="6"
                             BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
                             Padding="12" Margin="0,0,0,10">
                         <StackPanel>
-                            <TextBlock Text="过滤规则（命中即不进模型，直接回显原文）"
-                                       Style="{StaticResource CardTitle}" TextWrapping="Wrap" />
-
-                            <CheckBox x:Name="ChkR1" Content="R1  图标刷屏（RaidTargetingIcon）"
-                                      Checked="Rule_Changed" Unchecked="Rule_Changed" />
-                            <TextBlock Style="{StaticResource Dim}" Margin="22,0,0,6"
-                                       TextWrapping="Wrap"
-                                       Text="实测占比 27.1%，仅 10 条唯一内容重复 184 次" />
-
-                            <CheckBox x:Name="ChkR2" Content="R2  战斗日志（SPELL_*）"
-                                      Checked="Rule_Changed" Unchecked="Rule_Changed" />
-                            <TextBlock Style="{StaticResource Dim}" Margin="22,0,0,6"
-                                       TextWrapping="Wrap"
-                                       Text="实测占比 50.6%，最大单一类别" />
-
-                            <CheckBox x:Name="ChkR3" Content="R3  其他战斗事件（SWING_/RANGE_）"
-                                      Checked="Rule_Changed" Unchecked="Rule_Changed" />
-
-                            <CheckBox x:Name="ChkR4" Content="R4  拾取播报（获得了物品/赢得了）"
-                                      Checked="Rule_Changed" Unchecked="Rule_Changed" />
-                            <TextBlock Style="{StaticResource Dim}" Margin="22,0,0,6"
-                                       TextWrapping="Wrap" Text="实测占比 10.7%" />
-
-                            <CheckBox x:Name="ChkR5" Content="R5  伤害死亡播报（杀死了/点伤害）"
-                                      Checked="Rule_Changed" Unchecked="Rule_Changed" />
-
-                            <CheckBox x:Name="ChkR6" Content="R6  中文为主兜底（启发式，可关）"
-                                      Checked="Rule_Changed" Unchecked="Rule_Changed" />
-                            <TextBlock Style="{StaticResource Dim}" Margin="22,0,0,4"
-                                       TextWrapping="Wrap"
-                                       Text="剥离标记后中文占主导则跳过。可能误伤极短中英混合消息。" />
-
-                            <Grid Margin="22,0,0,6">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="阈值" Style="{StaticResource Dim}"
-                                           VerticalAlignment="Center" Margin="0,0,6,0" />
-                                <Slider Grid.Column="1" x:Name="SliderRatio" Minimum="0.5"
-                                        Maximum="6" TickFrequency="0.5"
-                                        IsSnapToTickEnabled="True"
-                                        VerticalAlignment="Center"
-                                        ValueChanged="SliderRatio_ValueChanged" />
-                                <TextBlock Grid.Column="2" x:Name="RatioText" Text="2.0"
-                                           Style="{StaticResource Dim}" VerticalAlignment="Center"
-                                           Margin="6,0,0,0" Width="26" />
-                            </Grid>
-
-                            <Separator Margin="0,4,0,8" Background="{StaticResource BorderBrush}" />
-
-                            <!-- 频道过滤 C0-C8（设计参照插件内建面板：综合/喊话/密语/队伍/公会/团队/战场/世界本地） -->
+<!-- 频道过滤 C0-C8（设计参照插件内建面板：综合/喊话/密语/队伍/公会/团队/战场/世界本地） -->
                             <TextBlock Text="按频道过滤（C0-C8）"
                                        Style="{StaticResource CardTitle}" />
                             <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,6"
@@ -244,7 +192,82 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- 推理参数 -->
+                    <!-- 插件 DLL 翻译选项（默认自动部署 Track B） -->
+                    <Border Background="{StaticResource PanelBrush}" CornerRadius="6"
+                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                            Padding="12" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="插件 DLL 翻译选项（默认自动部署 Track B）" Style="{StaticResource CardTitle}" />
+                            <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,6"
+                                       TextWrapping="Wrap"
+                                       Text="默认自动部署自有 DLL（无需选择轨道）。下方设置调整显示与外发行为，游戏内 /reload 或重启客户端生效。特殊情况需回退 GS 插件时，用上方「高级：切回 GS 备用轨道」。" />
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <TextBlock Text="Track B 译文显示：" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <ComboBox x:Name="CmbDirectDisplay" Width="200"
+                                          SelectionChanged="CmbDirectDisplay_SelectionChanged">
+                                    <ComboBoxItem Content="译文替换原文" Tag="replace" />
+                                    <ComboBoxItem Content="原文+译文（前缀追加）" Tag="both" />
+                                </ComboBox>
+                                <TextBlock Text="前缀" VerticalAlignment="Center" Margin="10,0,4,0" />
+                                <TextBox x:Name="TxtDirectPrefix" Width="90" Text="[译]"
+                                         LostFocus="TxtDirectPrefix_LostFocus" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <TextBlock Text="外发翻译（中文→英文）：" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <ComboBox x:Name="CmbDirectOutgoing" Width="200"
+                                          SelectionChanged="CmbDirectOutgoing_SelectionChanged">
+                                    <ComboBoxItem Content="关闭" Tag="off" />
+                                    <ComboBoxItem Content="只发英文（失败发原文）" Tag="replace" />
+                                    <ComboBoxItem Content="原文+英文都发" Tag="both" />
+                                </ComboBox>
+                            </StackPanel>
+                            <TextBlock x:Name="TxtDirectDisplayHint" Style="{StaticResource Dim}"
+                                       Margin="0,4,0,0" TextWrapping="Wrap"
+                                       Text="显示模式随 WoWTranslateDirect.json 写入游戏目录，切换轨道或修改后自动更新，重新登录游戏后生效。" />
+                        </StackPanel>
+                    </Border>
+
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- 游戏目录与部署（自动 Track B） -->
+                    <Border Background="{StaticResource PanelBrush}" CornerRadius="6"
+                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                            Padding="12" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="游戏目录与部署" Style="{StaticResource CardTitle}" />
+                            <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,6"
+                                       TextWrapping="Wrap"
+                                       Text="填入游戏客户端根目录（需含 Wow.exe 与 Data 文件夹），会自动部署翻译 DLL（默认 Track B，无需选择）。首次部署前自动备份现有 DLL 到 wtc_backup，之后直接覆盖；游戏运行中不会改动文件。" />
+<Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="游戏目录"
+                                           Style="{StaticResource FieldLabel}" />
+                                <TextBox Grid.Column="1" x:Name="TxtGameDir" Margin="0,3"
+                                          LostFocus="TxtGameDir_LostFocus" />
+                                <Button Grid.Column="2" x:Name="BtnBrowseGameDir" Content="浏览…"
+                                        Margin="6,3,0,0" Padding="8,3"
+                                        Click="BtnBrowseGameDir_Click" />
+                            </Grid>
+                            <TextBlock x:Name="TxtGameDirStatus" Style="{StaticResource Dim}"
+                                       Margin="0,4,0,0" TextWrapping="Wrap" Text="等待校验…" />
+                            <TextBlock x:Name="TxtDllStatus" Style="{StaticResource Dim}"
+                                       Margin="0,6,0,6" TextWrapping="Wrap" Text="正在检测…" />
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                <Button x:Name="BtnRefreshDll" Content="刷新状态" Padding="14,4"
+                                        Click="BtnRefreshDll_Click" />
+                                <Button x:Name="BtnTrackGs" Content="高级：切回 GS 备用轨道"
+                                        Margin="8,0,0,0" Padding="14,4" Click="BtnTrackGs_Click" />
+                                <Button x:Name="BtnTrackDirect" Content="切回主推轨道 B"
+                                        Margin="8,0,0,0" Padding="14,4" Click="BtnTrackDirect_Click" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+<!-- 推理参数 -->
                     <Border Background="{StaticResource PanelBrush}" CornerRadius="6"
                             BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
                             Padding="12" Margin="0,0,0,10">
@@ -357,28 +380,16 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- 插件一键配置（需求 8） -->
+                    <!-- 高级：GS 插件备用配置（一般无需使用） -->
                     <Border Background="{StaticResource PanelBrush}" CornerRadius="6"
                             BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
                             Padding="12" Margin="0,0,0,10">
                         <StackPanel>
-                            <TextBlock Text="插件一键配置" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="高级：GS 插件备用配置（一般无需使用）" Style="{StaticResource CardTitle}" />
                             <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,6"
                                        TextWrapping="Wrap"
                                        Text="写 WoWTranslate.ini（DLL 优先读取）+ SavedVariables 指向本地代理；可选注入频道标签 Lua 补丁。Wow.exe 运行时拒绝执行（防 SavedVariables 被覆盖）。" />
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="游戏目录"
-                                           Style="{StaticResource FieldLabel}" />
-                                <TextBox Grid.Column="1" x:Name="TxtGameDir" Margin="0,3" />
-                                <Button Grid.Column="2" x:Name="BtnBrowseGameDir" Content="浏览…"
-                                        Margin="6,3,0,0" Padding="8,3"
-                                        Click="BtnBrowseGameDir_Click" />
-                            </Grid>
+                            
                             <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                                 <CheckBox x:Name="ChkPatchLua" Content="注入频道标签 Lua 补丁"
                                           IsChecked="True" Margin="0,0,14,0" />
@@ -393,60 +404,66 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- 插件 DLL 轨道切换（ADR-007 双轨并行） -->
+                    <!-- 过滤规则 -->
                     <Border Background="{StaticResource PanelBrush}" CornerRadius="6"
                             BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
                             Padding="12" Margin="0,0,0,10">
                         <StackPanel>
-                            <TextBlock Text="插件 DLL 轨道切换" Style="{StaticResource CardTitle}" />
-                            <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,6"
+                            <TextBlock Text="过滤规则（命中即不进模型，直接回显原文）"
+                                       Style="{StaticResource CardTitle}" TextWrapping="Wrap" />
+
+                            <CheckBox x:Name="ChkR1" Content="R1  图标刷屏（RaidTargetingIcon）"
+                                      Checked="Rule_Changed" Unchecked="Rule_Changed" />
+                            <TextBlock Style="{StaticResource Dim}" Margin="22,0,0,6"
                                        TextWrapping="Wrap"
-                                       Text="主推 Track B = 自有 Direct DLL（全自治：捕获 / 翻译 / 聊天框显示一体，已实测稳定）；Track A = GS 插件（备用回退）。切换只动游戏根目录 DLL 文件，切换后自动把当前轨道的两个 DLL 备份到 wtc_backup，Wow.exe 运行时拒绝执行。" />
-                            <TextBlock x:Name="TxtDllStatus" Style="{StaticResource Dim}"
-                                       Margin="0,0,0,6" TextWrapping="Wrap" Text="正在检测…" />
-                            <ComboBox x:Name="CmbDllTrack" Width="320" HorizontalAlignment="Left"
-                                      SelectionChanged="CmbDllTrack_SelectionChanged">
-                                <ComboBoxItem Content="Track B — 自有 Direct DLL（主推）" Tag="direct" />
-                                <ComboBoxItem Content="Track A — GS 插件（备用回退）" Tag="gs" />
-                            </ComboBox>
-                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                <TextBlock Text="Track B 译文显示：" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                <ComboBox x:Name="CmbDirectDisplay" Width="200"
-                                          SelectionChanged="CmbDirectDisplay_SelectionChanged">
-                                    <ComboBoxItem Content="译文替换原文" Tag="replace" />
-                                    <ComboBoxItem Content="原文+译文（前缀追加）" Tag="both" />
-                                </ComboBox>
-                                <TextBlock Text="前缀" VerticalAlignment="Center" Margin="10,0,4,0" />
-                                <TextBox x:Name="TxtDirectPrefix" Width="90" Text="[译]"
-                                         LostFocus="TxtDirectPrefix_LostFocus" />
+                                       Text="实测占比 27.1%，仅 10 条唯一内容重复 184 次" />
+
+                            <CheckBox x:Name="ChkR2" Content="R2  战斗日志（SPELL_*）"
+                                      Checked="Rule_Changed" Unchecked="Rule_Changed" />
+                            <TextBlock Style="{StaticResource Dim}" Margin="22,0,0,6"
+                                       TextWrapping="Wrap"
+                                       Text="实测占比 50.6%，最大单一类别" />
+
+                            <CheckBox x:Name="ChkR3" Content="R3  其他战斗事件（SWING_/RANGE_）"
+                                      Checked="Rule_Changed" Unchecked="Rule_Changed" />
+
+                            <CheckBox x:Name="ChkR4" Content="R4  拾取播报（获得了物品/赢得了）"
+                                      Checked="Rule_Changed" Unchecked="Rule_Changed" />
+                            <TextBlock Style="{StaticResource Dim}" Margin="22,0,0,6"
+                                       TextWrapping="Wrap" Text="实测占比 10.7%" />
+
+                            <CheckBox x:Name="ChkR5" Content="R5  伤害死亡播报（杀死了/点伤害）"
+                                      Checked="Rule_Changed" Unchecked="Rule_Changed" />
+
+                            <CheckBox x:Name="ChkR6" Content="R6  中文为主兜底（启发式，可关）"
+                                      Checked="Rule_Changed" Unchecked="Rule_Changed" />
+                            <TextBlock Style="{StaticResource Dim}" Margin="22,0,0,4"
+                                       TextWrapping="Wrap"
+                                       Text="剥离标记后中文占主导则跳过。可能误伤极短中英混合消息。" />
+
+                            <Grid Margin="22,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="阈值" Style="{StaticResource Dim}"
+                                           VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <Slider Grid.Column="1" x:Name="SliderRatio" Minimum="0.5"
+                                        Maximum="6" TickFrequency="0.5"
+                                        IsSnapToTickEnabled="True"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="SliderRatio_ValueChanged" />
+                                <TextBlock Grid.Column="2" x:Name="RatioText" Text="2.0"
+                                           Style="{StaticResource Dim}" VerticalAlignment="Center"
+                                           Margin="6,0,0,0" Width="26" />
+                            </Grid>
+
+                            <Separator Margin="0,4,0,8" Background="{StaticResource BorderBrush}" />
+
                             </StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                <TextBlock Text="外发翻译（中文→英文）：" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                <ComboBox x:Name="CmbDirectOutgoing" Width="200"
-                                          SelectionChanged="CmbDirectOutgoing_SelectionChanged">
-                                    <ComboBoxItem Content="关闭" Tag="off" />
-                                    <ComboBoxItem Content="只发英文（失败发原文）" Tag="replace" />
-                                    <ComboBoxItem Content="原文+英文都发" Tag="both" />
-                                </ComboBox>
-                            </StackPanel>
-                            <TextBlock x:Name="TxtDirectDisplayHint" Style="{StaticResource Dim}"
-                                       Margin="0,4,0,0" TextWrapping="Wrap"
-                                       Text="显示模式随 WoWTranslateDirect.json 写入游戏目录，切换轨道或修改后自动更新，重新登录游戏后生效。" />
-                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                <Button x:Name="BtnSwitchDll" Content="切换到此轨道"
-                                        Style="{StaticResource PrimaryBtn}" Padding="14,4"
-                                        Click="BtnSwitchDll_Click" />
-                                <Button x:Name="BtnRefreshDll" Content="刷新状态"
-                                        Margin="8,0,0,0" Padding="14,4"
-                                        Click="BtnRefreshDll_Click" />
-                            </StackPanel>
-                        </StackPanel>
                     </Border>
-
-                </StackPanel>
-            </ScrollViewer>
-
-            <!-- 右：标签页 -->
+<!-- 右：标签页 -->
             <TabControl Grid.Column="1" Background="{StaticResource PanelBrush}"
                         BorderBrush="{StaticResource BorderBrush}">
 

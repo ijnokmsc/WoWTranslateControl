@@ -237,8 +237,6 @@ public sealed class DllSwitcher
                     File.Copy(src, Path.Combine(gameDir, f));
                 }
                 lines.Add("✔ 已恢复 Track A（GS 插件：dinput8.dll + WoWTranslate335.dll + dlls.txt）");
-                RefreshTrackBackup(gameDir, TrackGs,
-                    new[] { "dinput8.dll", "WoWTranslate335.dll", "dlls.txt" }, lines);
             }
             else
             {
@@ -250,8 +248,6 @@ public sealed class DllSwitcher
                 var cfgPath = WriteDirectConfig(gameDir, listenPort, displayMode, displayPrefix, outgoingMode);
                 lines.Add($"✔ 已部署 Track B（Direct DLL，资产来自 {srcDir}）");
                 lines.Add($"✔ 已写入 {Path.GetFileName(cfgPath)}（endpoint 127.0.0.1:{listenPort}，displayMode={displayMode}，outgoing={outgoingMode}）");
-                RefreshTrackBackup(gameDir, TrackDirect,
-                    new[] { "dinput8.dll", "WoWTranslateDirect.dll", "dlls.txt" }, lines);
             }
 
             // ---- 4. 写后自检 ----
@@ -273,33 +269,34 @@ public sealed class DllSwitcher
         }
     }
 
+
     /// <summary>
-    /// 切换成功后把当前轨道的部署组刷新到 wtc_backup/&lt;轨道&gt;/（覆盖写）——
-    /// 备份始终等于"上一次验证可用的部署组"，坏版本可直接手工回滚。
+    /// 自动部署主推轨道 B：未部署（gs/disabled/unknown）时静默切换；
+    /// 已部署则只做版本自愈比对。Wow.exe 运行时不动文件。
     /// </summary>
-    private static void RefreshTrackBackup(string gameDir, string track,
-        IEnumerable<string> files, List<string> lines)
+    public static List<string> EnsureDeployed(string gameDir, string directAssetsDir,
+        string displayMode, string displayPrefix, string outgoingMode,
+        int listenPort = 8080, Func<bool>? wowRunning = null)
     {
-        try
+        var status = Probe(gameDir, directAssetsDir);
+        if (status.Current == TrackDirect)
+            return EnsureUpToDate(gameDir, directAssetsDir, wowRunning);
+
+        var lines = new List<string>();
+        if (wowRunning?.Invoke() ?? PluginConfigurator.IsWowRunning())
         {
-            var dir = BackupDir(gameDir, track);
-            Directory.CreateDirectory(dir);
-            var copied = 0;
-            foreach (var f in files)
-            {
-                var src = Path.Combine(gameDir, f);
-                if (File.Exists(src))
-                {
-                    File.Copy(src, Path.Combine(dir, f), overwrite: true);
-                    copied++;
-                }
-            }
-            lines.Add($"  已备份当前轨道部署组（{copied} 个文件）→ wtc_backup/{track}/");
+            lines.Add("ℹ 检测到 Wow.exe 正在运行，自动部署跳过（关闭游戏后重新打开控制台即可）。");
+            return lines;
         }
-        catch (Exception ex)
+        if (!Directory.Exists(gameDir) || !File.Exists(Path.Combine(gameDir, "Wow.exe")))
         {
-            lines.Add($"  ⚠ 轨道备份失败：{ex.Message}");
+            lines.Add("ℹ 游戏目录无效，自动部署跳过。");
+            return lines;
         }
+        lines.Add("ℹ 未检测到主推轨道（Track B），正在自动部署…");
+        lines.AddRange(SwitchTo(gameDir, TrackDirect, directAssetsDir, wowRunning,
+            listenPort, displayMode, displayPrefix, outgoingMode));
+        return lines;
     }
 
     /// <summary>
@@ -333,8 +330,20 @@ public sealed class DllSwitcher
 
             if (drifted.Count == 0) return lines;
 
+            // 备份策略：有备份（wtc_backup/direct）就直接覆盖，没有先备份当前版本——
+            // 首次备份 = 原始版本，之后无需判断 DLL 归属
+            var bak = BackupDir(gameDir, TrackDirect);
+            Directory.CreateDirectory(bak);
             foreach (var f in drifted)
+            {
+                var bakFile = Path.Combine(bak, f);
+                if (!File.Exists(bakFile))
+                {
+                    File.Copy(Path.Combine(gameDir, f), bakFile);
+                    lines.Add($"  已备份 {f} → wtc_backup/direct/（首次）");
+                }
                 File.Copy(Path.Combine(status.DirectAssetsDir, f), Path.Combine(gameDir, f), overwrite: true);
+            }
             lines.Add($"✔ 游戏目录 DLL 与本地资产版本不一致（{string.Join("、", drifted)}），已自动重新部署。" +
                       "下次启动游戏生效。");
         }
