@@ -94,13 +94,13 @@ local SYSTEM_EVENTS = {
   CHAT_MSG_COMBAT_XP_GAIN = true, CHAT_MSG_COMBAT_MISC_INFO = true,
 }
 
-local curChannel, curSystem = nil, false
+local curChannel, curSystem, curSender = nil, false, nil
 local pending, counter = {}, 0
 local outPending, outCounter = {}, 0
 local origSend = nil
 
 -- v19 诊断旗标（各只回报一次，进 DLL 日志定位链路断点）
-local dbgHooked, dbgCapture, dbgCjk = false, false, 0   -- dbgCjk 是计数器（false 无法比较）
+local dbgHooked, dbgCapture, dbgCjk = false, 0, 0   -- dbgCapture/dbgCjk 是计数器   -- dbgCjk 是计数器（false 无法比较）
 local dbgQueueErr, dbgTransOk, dbgTransErr, dbgTimeout, dbgDisplayed = false, false, false, false, false
 local dbgOutOk, dbgOutErr, dbgOutSkip = false, false, false
 
@@ -276,6 +276,22 @@ local function StripChatPrefixBody(text)
     return n > 0
   end
 
+  -- 发送者锚定剥离（最精确，任意聊天 UI 格式通用）：事件参数给出对方 ID，
+  -- 在头部定位 "[ID" 到其后的 "]"，连同 |r/冒号/空白 一并剥离。
+  -- 失败时回落到通用模式链
+  if curSender and curSender ~= "" then
+    local p1 = string.find(w, "[" .. curSender, 1, true)
+    if p1 and (p1 == 1 or p1 <= 16) then
+      local e1 = string.find(w, "]", p1, true)
+      if e1 then
+        header = header .. string.sub(w, 1, e1)
+        w = string.sub(w, e1 + 1)
+        w = string.gsub(w, "^|r", "")
+        w = string.gsub(w, "^%s*:%s*", "")
+        nameConsumed = true
+      end
+    end
+  end
   for _ = 1, 8 do
     local before = #w
     consume("^%s+")
@@ -345,12 +361,12 @@ local function HandleIncoming(frame, orig, text, r, g, b, id, hold)
   if toSend == "" then
     return Passthrough(frame, orig, text, r, g, b, id, hold)
   end
-  if not dbgCapture then
-    dbgCapture = true
-    -- 取证：原始 AddMessage 全文（含超链接原始字节，定位乱码来源）
-    WoWTranslate_Diag("WTC_RAW ch=" .. tostring(curChannel) ..
+  if dbgCapture < 10 then
+    dbgCapture = dbgCapture + 1
+    -- 取证：原始 AddMessage 全文（含超链接原始字节，定位各聊天 UI 格式问题）
+    WoWTranslate_Diag("WTC_RAW #" .. dbgCapture .. " ch=" .. tostring(curChannel) ..
       " text=" .. string.sub(text, 1, 200))
-    WoWTranslate_Diag("WTC_CAPTURE ch=" .. tostring(curChannel) ..
+    WoWTranslate_Diag("WTC_CAPTURE #" .. dbgCapture .. " ch=" .. tostring(curChannel) ..
       " send=" .. string.sub(toSend, 1, 60))
   end
   counter = counter + 1
@@ -399,9 +415,11 @@ WoWTranslate_Diag("WTC_HOOKED windows=" .. tostring(NUM_CHAT_WINDOWS) .. " hooke
 local origOnEvent = ChatFrame_OnEvent
 ChatFrame_OnEvent = function(self, event, ...)
   curChannel = CHANNELS[event]
+  curSender = (select(2, ...)) or nil   -- CHAT_MSG_* 第 2 参 = 发送者名
   curSystem = SYSTEM_EVENTS[event] == true
   local res = origOnEvent(self, event, ...)
   curChannel = nil
+  curSender = nil
   curSystem = false
   return res
 end
