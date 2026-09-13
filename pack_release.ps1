@@ -11,7 +11,7 @@ $ver = ($ver -split '\+')[0]   # 去掉 SourceRevisionId 追加的 git 哈希
 if (-not $ver) { $ver = '2.1.1' }
 
 # ---- 排除规则：用户运行数据 / 构建残留 / 旧压缩包 ----
-$excludeDirs  = @('llama.cpp')
+$excludeDirs  = @('llama.cpp', '问题收集')
 $excludeFiles = @('settings.json', 'cache.json', 'proxy_traffic.log', 'crash.log')
 $excludeExt   = @('.tmp', '.pdb', '.zip', '.7z')
 
