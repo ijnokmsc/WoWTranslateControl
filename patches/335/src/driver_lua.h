@@ -319,7 +319,8 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
         if dbg.terr <= 3 then
           WoWTranslate_Diag("WTC_TRANSERR id=" .. id .. " err=" .. string.sub(er, 1, 80))
         end
-        DisplayLine("[WTC] " .. p.text, 1, 0.4, 0.4)
+        -- 失败回显原文（不加诊断前缀，保持聊天观感）
+        DisplayLine(p.text, 1, 0.4, 0.4)
       else
         dbg.ok = dbg.ok + 1
         if dbg.ok <= 3 then
@@ -342,13 +343,14 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
 
   local now = GetTime()
   for mid, p in pairs(pending) do
-    if now - p.t > 30 then
+    -- 60s：世界频道消息爆发时单线程队列排队 + 串行翻译，30s 会误超时
+    if now - p.t > 60 then
       pending[mid] = nil
       dbg.to = dbg.to + 1
       if dbg.to <= 3 then
         WoWTranslate_Diag("WTC_TIMEOUT id=" .. mid)
       end
-      DisplayLine("[WTC] " .. p.text, 1, 0.4, 0.4)
+      DisplayLine(p.text, 1, 0.4, 0.4)
     end
   end
   -- 外发超时：replace 模式发原文兜底（both 已发过原文）
