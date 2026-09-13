@@ -27,7 +27,7 @@ public partial class App : System.Windows.Application
                 $"  .NET: {Environment.Version}\n" +
                 $"  OS: {Environment.OSVersion.VersionString}\n" +
                 $"  exe: {Environment.ProcessPath}\n" +
-                $"  64bit: {!Environment.Is32BitProcess}\n");
+                $"  64bit: {Environment.Is64BitProcess}\n");
         }
         catch { }
 
