@@ -323,6 +323,8 @@ SendChatMessage = function(msg, chatType, language, channel)
   local oid = "out_" .. outCounter
   outPending[oid] = { msg = msg, chatType = chatType,
                       language = language, channel = channel, t = GetTime() }
+  WoWTranslate_Diag("WTC_OUTCAPTURE id=" .. oid .. " type=" .. tostring(chatType) ..
+    " to=" .. tostring(channel) .. " msg=" .. string.sub(msg, 1, 50))
   local ok = pcall(function()
     WoWTranslate_Translate("\1ZH2EN\1" .. msg, "zh", "en", oid)
   end)
