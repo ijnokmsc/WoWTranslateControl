@@ -208,6 +208,9 @@ public sealed class AppConfig
     /// <summary>Track B both 模式的译文行前缀。</summary>
     public string DirectDisplayPrefix { get; set; } = "[译]";
 
+    /// <summary>游戏目录 DLL 文件日志（WoWTranslateDirect.log）开关。默认关，排错时打开。</summary>
+    public bool DllLogEnabled { get; set; } = false;
+
     /// <summary>
     /// Track B 外发翻译模式："off" = 关闭；"replace" = 你发的中文只发英文译文（失败发原文）；
     /// "both" = 原文和英文都发。随 WoWTranslateDirect.json 写入游戏目录，重登生效。

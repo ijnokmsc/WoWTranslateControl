@@ -98,7 +98,8 @@ public sealed class DllSwitcher
     /// UTF-8 无 BOM（DLL 侧 nlohmann::json 不认 BOM）。
     /// </summary>
     public static string WriteDirectConfig(string gameDir, int listenPort,
-        string displayMode, string displayPrefix, string outgoingMode = "off")
+        string displayMode, string displayPrefix, string outgoingMode = "off",
+        bool dllLog = false)
     {
         if (displayMode != "replace" && displayMode != "both") displayMode = "replace";
         if (outgoingMode != "off" && outgoingMode != "replace" && outgoingMode != "both")
@@ -112,7 +113,7 @@ public sealed class DllSwitcher
             $"  \"displayMode\": \"{displayMode}\",\n" +
             $"  \"displayPrefix\": \"{EscapeJson(displayPrefix ?? "[译]")}\",\n" +
             $"  \"outgoingMode\": \"{outgoingMode}\",\n" +
-            $"  \"log\": false\n" +
+            $"  \"log\": {(dllLog ? "true" : "false")}\n" +
             "}\n";
         var path = Path.Combine(gameDir, "WoWTranslateDirect.json");
         File.WriteAllText(path, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
@@ -151,7 +152,8 @@ public sealed class DllSwitcher
         int listenPort = 8080,
         string displayMode = "replace",
         string displayPrefix = "[译]",
-        string outgoingMode = "off")
+        string outgoingMode = "off",
+        bool dllLog = false)
     {
         var lines = new List<string>();
         try
@@ -245,7 +247,7 @@ public sealed class DllSwitcher
                     File.Copy(Path.Combine(srcDir, f), Path.Combine(gameDir, f));
                 File.WriteAllText(Path.Combine(gameDir, "dlls.txt"),
                     "WoWTranslateDirect.dll" + Environment.NewLine);
-                var cfgPath = WriteDirectConfig(gameDir, listenPort, displayMode, displayPrefix, outgoingMode);
+                var cfgPath = WriteDirectConfig(gameDir, listenPort, displayMode, displayPrefix, outgoingMode, dllLog);
                 lines.Add($"✔ 已部署 Track B（Direct DLL，资产来自 {srcDir}）");
                 lines.Add($"✔ 已写入 {Path.GetFileName(cfgPath)}（endpoint 127.0.0.1:{listenPort}，displayMode={displayMode}，outgoing={outgoingMode}）");
             }
@@ -276,7 +278,7 @@ public sealed class DllSwitcher
     /// </summary>
     public static List<string> EnsureDeployed(string gameDir, string directAssetsDir,
         string displayMode, string displayPrefix, string outgoingMode,
-        int listenPort = 8080, Func<bool>? wowRunning = null)
+        int listenPort = 8080, Func<bool>? wowRunning = null, bool dllLog = false)
     {
         var status = Probe(gameDir, directAssetsDir);
         if (status.Current == TrackDirect)
@@ -295,7 +297,7 @@ public sealed class DllSwitcher
         }
         lines.Add("ℹ 未检测到主推轨道（Track B），正在自动部署…");
         lines.AddRange(SwitchTo(gameDir, TrackDirect, directAssetsDir, wowRunning,
-            listenPort, displayMode, displayPrefix, outgoingMode));
+            listenPort, displayMode, displayPrefix, outgoingMode, dllLog));
         return lines;
     }
 

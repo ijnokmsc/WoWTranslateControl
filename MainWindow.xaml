@@ -149,6 +149,8 @@
                                       Unchecked="Tray_Changed" />
                             <CheckBox x:Name="ChkFileLog" Content="写入文件日志 proxy_traffic.log（排错用，默认关）"
                                       Checked="ChkFileLog_Changed" Unchecked="ChkFileLog_Changed" />
+                            <CheckBox x:Name="ChkDllLog" Content="DLL 日志 WoWTranslateDirect.log（排错用，默认关）"
+                                      Checked="ChkDllLog_Changed" Unchecked="ChkDllLog_Changed" />
                         </StackPanel>
                     </Border>
 

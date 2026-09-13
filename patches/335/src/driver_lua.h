@@ -459,11 +459,28 @@ end
 
 -- ---- 轮询帧：Poll 译文 + 30s 超时兜底 ----
 local pollAcc = 0
+  local rehookAcc = 0
 local pollFrame = CreateFrame("Frame")
 pollFrame:SetScript("OnUpdate", function(self, elapsed)
   pollAcc = pollAcc + elapsed
   if pollAcc < 0.1 then return end
   pollAcc = 0
+  rehookAcc = rehookAcc + elapsed
+  if rehookAcc > 3 then
+    rehookAcc = 0
+    for i = 1, NUM_CHAT_WINDOWS do
+      local f = getglobal("ChatFrame" .. i)
+      if f and f.AddMessage and not f.WTCDirectHooked then
+        f.WTCDirectHooked = true
+        hookedCount = hookedCount + 1
+        local orig = f.AddMessage
+        f.AddMessage = function(self, text, r, g, b, id, hold)
+          HandleIncoming(self, orig, text, r, g, b, id, hold)
+        end
+        WoWTranslate_Diag("WTC_REHOOK " .. (f:GetName() or "?"))
+      end
+    end
+  end
   for _ = 1, 16 do
     local ok, j = pcall(WoWTranslate_Poll)
     if not ok or not j or j == "" then break end

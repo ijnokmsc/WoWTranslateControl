@@ -246,6 +246,7 @@ public partial class MainWindow : Window
         // 托盘与 DLL 轨道
         ChkTray.IsChecked = _cfg.MinimizeToTray;
         ChkFileLog.IsChecked = _cfg.WriteFileLog;
+        ChkDllLog.IsChecked = _cfg.DllLogEnabled;
         // Track B 显示模式（v16 全自治驱动）
         foreach (System.Windows.Controls.ComboBoxItem item in CmbDirectDisplay.Items)
             if ((string)item.Tag == _cfg.DirectDisplayMode) { CmbDirectDisplay.SelectedItem = item; break; }
@@ -400,7 +401,8 @@ public partial class MainWindow : Window
                         Directory.Exists(gd) && File.Exists(Path.Combine(gd, "Wow.exe")))
                     {
                         Core.DllSwitcher.WriteDirectConfig(gd, _cfg.ListenPort,
-                            _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix, _cfg.DirectOutgoingMode);
+                            _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix, _cfg.DirectOutgoingMode,
+                            dllLog: _cfg.DllLogEnabled);
                         Log("已同步游戏目录 WoWTranslateDirect.json——游戏内 /reload 或重启游戏生效");
                     }
                 }
@@ -1133,7 +1135,7 @@ public partial class MainWindow : Window
             var assets = System.IO.Path.Combine(AppContext.BaseDirectory, "assets", "direct-dll");
             var lines = Core.DllSwitcher.EnsureDeployed(gameDir, assets,
                 _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix, _cfg.DirectOutgoingMode,
-                listenPort: _cfg.ListenPort);
+                listenPort: _cfg.ListenPort, dllLog: _cfg.DllLogEnabled);
             foreach (var l in lines) Log(l);
             RefreshDllStatus();
         }
@@ -1141,6 +1143,16 @@ public partial class MainWindow : Window
         {
             Log("自动部署失败：" + ex.Message);
         }
+    }
+
+    private void ChkDllLog_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        _cfg.DllLogEnabled = ChkDllLog.IsChecked == true;
+        _cfg.Save();
+        SyncDirectConfigToGameDir();
+        Log($"DLL 日志 WoWTranslateDirect.log 已{(ChkDllLog.IsChecked == true ? "开启" : "关闭")}" +
+            (ChkDllLog.IsChecked == true ? "" : "；游戏内 /reload 生效"));
     }
 
     private void ChkFileLog_Changed(object sender, RoutedEventArgs e)
