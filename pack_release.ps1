@@ -12,7 +12,7 @@ if (-not $ver) { $ver = '2.1.1' }
 
 # ---- 排除规则：用户运行数据 / 构建残留 / 旧压缩包 ----
 $excludeDirs  = @('llama.cpp', '问题收集')
-$excludeFiles = @('settings.json', 'cache.json', 'proxy_traffic.log', 'crash.log')
+$excludeFiles = @('settings.json', 'cache.json', 'proxy_traffic.log', 'crash.log', 'startup.log')
 $excludeExt   = @('.tmp', '.pdb', '.zip', '.7z')
 
 $files = Get-ChildItem -LiteralPath $src -Recurse -File | Where-Object {
