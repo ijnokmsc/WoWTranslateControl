@@ -73,7 +73,7 @@ local outTimeout = tonumber(WTC_CFG.outTimeout or 25)
 local pending, counter = {}, 0
 local outPending, outCounter = {}, 0
 local origSend = SendChatMessage
-local dbg = { hooked = 0, raw = 0, skip = 0, ok = 0, terr = 0, to = 0, oto = 0 }
+local dbg = { hooked = 0, raw = 0, skip = 0, ok = 0, terr = 0, to = 0, oto = 0, oev = 0, addm = 0 }
 
 local curChannel, curSystem, curSender = nil, false, nil
 
@@ -335,6 +335,11 @@ for i = 1, NUM_CHAT_WINDOWS do
     f.WTCDirectHooked = true
     local orig = f.AddMessage
     f.AddMessage = function(self, text, r, g, b, id, hold)
+      if dbg.addm < 8 then
+        dbg.addm = dbg.addm + 1
+        WoWTranslate_Diag("WTC_ADDM #" .. dbg.addm .. " ch=" .. tostring(curChannel) ..
+          " sender=" .. tostring(curSender) .. " text=" .. string.sub(tostring(text), 1, 80))
+      end
       HandleIncoming(self, orig, text, r, g, b, id, hold)
     end
   end
@@ -347,6 +352,11 @@ ChatFrame_OnEvent = function(self, event, ...)
   curChannel = EVENTS[event]
   curSystem = SYSTEM_EVENTS[event] == true
   curSender = (select(2, ...)) or nil
+  if dbg.oev < 8 then
+    dbg.oev = dbg.oev + 1
+    WoWTranslate_Diag("WTC_OEV #" .. dbg.oev .. " ev=" .. tostring(event) ..
+      " ch=" .. tostring(curChannel) .. " sender=" .. tostring(curSender))
+  end
   local res = origOnEvent(self, event, ...)
   curChannel = nil
   curSystem = false
