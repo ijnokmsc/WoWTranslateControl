@@ -457,7 +457,7 @@ static void RebuildDriverChunk()
     const char* part2 = "',prefix='";
     const char* part3 = "',outgoing='";
     const char* part4 = "',outTimeout=";
-    const char* part5 = "'}\n";
+    const char* part5 = "}\n";
     g_driverChunk = std::string(part1) + wt::LuaEscape(g_displayMode) +
                     part2 + wt::LuaEscape(g_displayPrefix) +
                     part3 + wt::LuaEscape(g_outgoingMode) +
