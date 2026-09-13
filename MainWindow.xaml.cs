@@ -115,6 +115,8 @@ public partial class MainWindow : Window
     {
         InitTray();
         RefreshDllStatus();
+        // 初始定位到左栏顶部（初始化期间控件变更可能触发 BringIntoView 滚动）
+        LeftScroll.ScrollToTop();
 
         _llama = new LlamaServerManager(_cfg);
         _llama.OnStateChanged += OnLlamaStateChanged;
@@ -155,6 +157,11 @@ public partial class MainWindow : Window
                             "请打开「环境检测与下载向导」完成下载，或把文件放入 llama 目录后手动启动。");
                 }
                 if (_cfg.ProxyAutoStart) StartProxy();
+                // 启动过程禁用/启用按钮会移动键盘焦点，WPF 顺链 BringIntoView
+                // 把左栏滚到底部（用户误以为"过滤规则盖住了其他卡片"）——
+                // 全部服务就绪后滚回顶部并把焦点还给第一个按钮
+                LeftScroll.ScrollToTop();
+                BtnStartLlama.Focus();
             }), DispatcherPriority.Background);
     }
 

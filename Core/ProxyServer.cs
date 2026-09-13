@@ -282,7 +282,19 @@ public sealed class ProxyServer : IDisposable
         // 只有 chat/completions 需要解析与管线处理，其余原样透传
         if (method == "POST" && path.Contains("chat/completions", StringComparison.OrdinalIgnoreCase))
         {
+            // 浏览器/探活会发出空体或 OPTIONS 预检——本地直接应答，
+            // 不透传给 llama-server（空 JSON 会让其记 parse error 日志）
+            if (body.Length == 0)
+            {
+                await SendAsync(stream, 400, "{\"error\":\"empty body\"}", keepAlive, ct).ConfigureAwait(false);
+                return;
+            }
             await HandleChatAsync(stream, body, keepAlive, sw, ct).ConfigureAwait(false);
+            return;
+        }
+        if (method == "OPTIONS")
+        {
+            await SendAsync(stream, 204, "", keepAlive, ct).ConfigureAwait(false);
             return;
         }
 

@@ -112,7 +112,7 @@
             </Grid.ColumnDefinitions>
 
             <!-- 左：控制面板 -->
-            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,10,0">
+            <ScrollViewer Grid.Column="0" x:Name="LeftScroll" VerticalScrollBarVisibility="Auto" Margin="0,0,10,0">
                 <StackPanel>
 
                     <!-- 服务控制 -->
