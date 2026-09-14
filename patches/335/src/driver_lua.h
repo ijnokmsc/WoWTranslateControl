@@ -72,7 +72,7 @@ local outTimeout = tonumber(WTC_CFG.outTimeout or 25)
 local pending, counter = {}, 0
 local outPending, outCounter = {}, 0
 local origSend = SendChatMessage
-local dbg = { raw = 0, own = 0, ok = 0, terr = 0, to = 0, oto = 0 }
+local dbg = { raw = 0, own = 0, ok = 0, terr = 0, to = 0, oto = 0, chatEvt = 0 }
 
 local function HasCJK(t)
   -- GBK 与 UTF-8 的中文首字节均 >= 0x81，命中即视为含中文
@@ -268,8 +268,15 @@ local ef = CreateFrame("Frame")
 local evlist = {}
 for ev in pairs(EVENTS) do table.insert(evlist, ev) end
 for _, ev in ipairs(evlist) do ef:RegisterEvent(ev) end
-
+-- v33 诊断：事件帧收到的所有事件（前 12 个），区分"引擎未派发"与"处理分支问题"
+local dbgEv, evCount = {}, 0
 ef:SetScript("OnEvent", function(self, event, msg, sender, ...)
+  if evCount < 12 then
+    evCount = evCount + 1
+    WoWTranslate_Diag("WTC_EVT #" .. evCount .. " ev=" .. tostring(event) ..
+      " msg=" .. string.sub(tostring(msg), 1, 40) ..
+      " sender=" .. tostring(sender))
+  end
   local ch = EVENTS[event]
   if not ch or not msg or msg == "" then return end
   -- 自己的消息回显不处理
@@ -280,6 +287,23 @@ ef:SetScript("OnEvent", function(self, event, msg, sender, ...)
   if SeenMark(ch, tostring(sender or ""), msg) then return end
   TryCapture(ch, msg, sender, ChanLabel(ch, ...))
 end)
+
+-- v33 探针：包装前 3 个聊天框的 OnEvent 脚本（EUI/巨龙UI 若替换了脚本，
+-- 此探针能看到聊天框实际收到的事件）——仅诊断，不影响显示
+for i = 1, 3 do
+  local f = getglobal("ChatFrame" .. i)
+  if f then
+    local prev = f:GetScript("OnEvent")
+    f:SetScript("OnEvent", function(fs, event, ...)
+      if dbg.chatEvt < 8 then
+        dbg.chatEvt = dbg.chatEvt + 1
+        WoWTranslate_Diag("WTC_CF" .. i .. " #" .. dbg.chatEvt .. " ev=" .. tostring(event) ..
+          " msg=" .. string.sub(tostring(msg), 1, 40))
+      end
+      if prev then return prev(fs, event, ...) end
+    end)
+  end
+end
 
 -- ---- 轮询帧：Poll 译文 + 显示 + 超时兜底 ----
 local pollAcc = 0
