@@ -164,23 +164,11 @@ local function DisplayLine(text, r, g, b)
   end
 end
 
--- ---- 捕获去重：过滤器与事件帧都会看到同一条消息，只入队一次 ----
-local seen = {}
-local seenCount = 0
-local function SeenMark(ch, sender, msg)
+-- ---- 捕获去重查询：只查不标（标记由 TryCapture 负责）----
+-- v33 修复：SeenMark 先标后查会自吞事件帧自己的捕获（说/团队零捕获根因）
+local function SeenCheck(ch, sender, msg)
   local key = ch .. "|" .. tostring(sender) .. "|" .. msg
-  if seen[key] and GetTime() - seen[key] < 60 then
-    return true   -- 已处理过（60s 窗口）
-  end
-  seen[key] = GetTime()
-  seenCount = seenCount + 1
-  if seenCount % 64 == 0 then   -- 定期清理过期键
-    local now = GetTime()
-    for k, t in pairs(seen) do
-      if now - t > 120 then seen[k] = nil end
-    end
-  end
-  return false
+  return seen[key] and GetTime() - seen[key] < 60
 end
 
 -- 捕获主体：入队翻译。返回 "queued"（首次）或 "dup"（重复）。
@@ -309,8 +297,8 @@ ef:SetScript("OnEvent", function(self, event, msg, sender, ...)
   local me = UnitName and UnitName("player")
   if me and me ~= "" and sender == me then return end
 
-  -- 过滤器已捕获过的（SeenMark/TryCapture 60s 窗口）→ 跳过
-  if SeenMark(ch, tostring(sender or ""), msg) then return end
+  -- 过滤器已捕获过的（60s 窗口）→ 跳过
+  if SeenCheck(ch, tostring(sender or ""), msg) then return end
   TryCapture(ch, msg, sender, ChanLabel(ch, ...))
 end)
 
