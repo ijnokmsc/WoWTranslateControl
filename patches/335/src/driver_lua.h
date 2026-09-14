@@ -346,24 +346,22 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
     local tr = JsonGetString(j, "translation") or ""
     local er = JsonGetString(j, "error") or ""
     local otxt = JsonGetString(j, "orig") or ""
-    -- 外发结果（out_N）：发英文（错误发原文）
+    -- 外发结果（out_N）：发英文译文（带 [TR] 标识，英文玩家一眼识别翻译文字）；
+    -- 译文缺失/仍含中文（模型方向失控）→ 回退发原文
     if id and string.sub(id, 1, 4) == "out_" then
       local o = outPending[id]
       if o then
         outPending[id] = nil
-        local sendText = o.msg
-        -- 质检：zh→en 译文若仍含 CJK（模型方向失控）→ 发英文提示。
-        -- 不发中文原文：对方可能是无中文字体的英文客户端（乱码）
-        if er == "" and tr ~= "" and not HasCJKUtf8(tr) then
-          sendText = tr
+        local trOk = (er == "" and tr ~= "" and not HasCJKUtf8(tr))
+        if trOk then
+          pcall(function() origSend("[TR] " .. tr, o.chatType, o.language, o.channel) end)
         else
-          sendText = "[WTC]: translation failed"
-          WoWTranslate_Diag("WTC_ZH2EN_BAD id=" .. id .. " tr=" .. string.sub(tr, 1, 40))
+          pcall(function() origSend(o.msg, o.chatType, o.language, o.channel) end)
         end
-        pcall(function() origSend(sendText, o.chatType, o.language, o.channel) end)
         dbg.ok = dbg.ok + 1
         if dbg.ok <= 3 then
-          WoWTranslate_Diag("WTC_OUTOK id=" .. id .. " send=" .. string.sub(sendText, 1, 60))
+          WoWTranslate_Diag("WTC_OUTOK id=" .. id .. " ok=" .. tostring(trOk) ..
+            " send=" .. string.sub(trOk and ("[TR] " .. tr) or o.msg, 1, 60))
         end
       end
     else
