@@ -185,6 +185,13 @@ local function TryCapture(ch, msg, sender, chanLabel)
       " sender=" .. tostring(sender) .. " text=" .. string.sub(msg, 1, 160))
   end
 
+  -- 消息风暴限流：待翻译积压过多时放弃新消息（原文自然显示，防显示风暴）
+  local backlog = 0
+  for _, p in pairs(pending) do backlog = backlog + 1 end
+  if backlog >= 24 then
+    WoWTranslate_Diag("WTC_STORM skip (backlog=" .. backlog .. ")")
+    return "queued"
+  end
   counter = counter + 1
   local mid = "m" .. counter
   local ci = ChatTypeInfo[CHAT_TYPE[ch]]
@@ -216,12 +223,17 @@ local function ChanLabel(ch, ...)
   return CHAN_CN[ch] or ""
 end
 
--- 消息是否应送翻（频道已知 + 非空 + 含拉丁字母 + 非自己发言）
+-- 消息是否应送翻（频道已知 + 非空 + 非自己发言 + 非中文 + 非已译标识）
+-- 中文判定（编码无关）：任一字节 >= 0x81 即含 CJK（GBK 双字节首位/UTF-8 首字节均为高位）
+-- ——事件参数是纯正文（无头污染），该判定不再误伤"中文 ID 玩家的英文消息"
+local TRANSLATE_MARK = "[译]"
 local function ShouldTranslate(event, msg, sender)
   local ch = EVENTS[event]
   if not ch or not msg or msg == "" then return nil end
   local me = UnitName and UnitName("player")
   if me and me ~= "" and sender == me then return nil end
+  if string.find(msg, TRANSLATE_MARK, 1, true) then return nil end   -- 已译标识防回环
+  if HasCJK(msg) then return nil end   -- 中文消息不送翻（双方都装软件时的重复根源）
   return ch
 end
 
@@ -230,7 +242,7 @@ end
 -- 实测若该客户端过滤器链不回调（v28 疑似），压制退化为追加显示，无损。
 local suppressCount = 0
 local function WTCSuppressFilter(chatFrame, event, msg, sender, ...)
-  local ch = EVENTS[event]
+  local ch = ShouldTranslate(event, msg, sender)
   if not ch then return false end
   local r = TryCapture(ch, msg, sender, ChanLabel(ch, ...))
   if r == "queued" then
@@ -277,8 +289,8 @@ ef:SetScript("OnEvent", function(self, event, msg, sender, ...)
       " msg=" .. string.sub(tostring(msg), 1, 40) ..
       " sender=" .. tostring(sender))
   end
-  local ch = EVENTS[event]
-  if not ch or not msg or msg == "" then return end
+  local ch = ShouldTranslate(event, msg, sender)
+  if not ch then return end
   -- 自己的消息回显不处理
   local me = UnitName and UnitName("player")
   if me and me ~= "" and sender == me then return end
@@ -356,10 +368,10 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
         if tr ~= "" and (tr == otxt or tr == p.text) and not p.suppressed then
           -- skip
         else
-          local line = p.chanLabel or ""
-          if line ~= "" then line = line .. " " end
+          local line = TRANSLATE_MARK
+          if p.chanLabel ~= "" then line = p.chanLabel .. " " .. line end
           if p.sender ~= "" then
-            line = line .. "|Hplayer:" .. p.sender .. "|h[" .. p.sender .. "]|h： "
+            line = line .. " |Hplayer:" .. p.sender .. "|h[" .. p.sender .. "]|h： "
           end
           line = line .. tr
           if displayMode == "both" then
