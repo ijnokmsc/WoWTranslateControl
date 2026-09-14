@@ -172,7 +172,7 @@ local function SeenMark(ch, sender, msg)
 end
 
 -- 捕获主体：入队翻译。返回 "queued"（首次）或 "dup"（重复）。
-local function TryCapture(ch, msg, sender)
+local function TryCapture(ch, msg, sender, chanLabel)
   local key = ch .. "|" .. tostring(sender) .. "|" .. msg
   if seen[key] and GetTime() - seen[key] < 60 then
     return "dup"
@@ -189,6 +189,7 @@ local function TryCapture(ch, msg, sender)
   local mid = "m" .. counter
   local ci = ChatTypeInfo[CHAT_TYPE[ch]]
   pending[mid] = { sender = tostring(sender or ""), text = msg,
+                   chanLabel = chanLabel or "", suppressed = false,
                    r = ci and ci.r, g = ci and ci.g, b = ci and ci.b,
                    t = GetTime(), done = false }
   local ok = pcall(function()
@@ -201,6 +202,18 @@ local function TryCapture(ch, msg, sender)
     pending[mid] = nil
   end
   return "queued"
+end
+
+-- 频道显示标签：自定义频道用事件给出的频道名，标准频道用固定中文
+local CHAN_CN = { SAY = "[综合]", YELL = "[喊话]", WHISPER = "[密语]", PARTY = "[队伍]",
+  GUILD = "[公会]", RAID = "[团队]", BATTLEGROUND = "[战场]" }
+local function ChanLabel(ch, ...)
+  if ch == "CHANNEL" then
+    local nm = select(2, ...)   -- CHAT_MSG_CHANNEL: msg, sender, lang, channelName
+    if nm and nm ~= "" then return "[" .. tostring(nm) .. "]" end
+    return "[世界]"
+  end
+  return CHAN_CN[ch] or ""
 end
 
 -- 消息是否应送翻（频道已知 + 非空 + 含拉丁字母 + 非自己发言）
@@ -216,11 +229,20 @@ end
 -- ChatFrame_AddMessageEventFilter(event, filter)：按事件全局注册。
 -- 实测若该客户端过滤器链不回调（v28 疑似），压制退化为追加显示，无损。
 local suppressCount = 0
-local function WTCSuppressFilter(chatFrame, event, msg, sender)
+local function WTCSuppressFilter(chatFrame, event, msg, sender, ...)
   local ch = EVENTS[event]
   if not ch then return false end
-  local r = TryCapture(ch, msg, sender)
+  local r = TryCapture(ch, msg, sender, ChanLabel(ch, ...))
   if r == "queued" then
+    -- 标记该条已被压制（译文回显时跳过判重的依据）
+    local snd = tostring(sender or "")
+    local newest, newestT
+    for _, p in pairs(pending) do
+      if p.sender == snd and not p.done and (newestT == nil or p.t > newestT) then
+        newest, newestT = p, p.t
+      end
+    end
+    if newest then newest.suppressed = true end
     suppressCount = suppressCount + 1
     if suppressCount <= 3 then
       WoWTranslate_Diag("WTC_FILTERCAP #" .. suppressCount .. " ch=" .. ch ..
@@ -254,32 +276,9 @@ ef:SetScript("OnEvent", function(self, event, msg, sender, ...)
   local me = UnitName and UnitName("player")
   if me and me ~= "" and sender == me then return end
 
-  if SeenMark(ch, tostring(sender or ""), msg) then
-    return   -- 过滤器已捕获过（去重）
-  end
-
-  -- 走到这里 = 过滤器链未生效（客户端差异）→ 事件帧兜底入队，无压制
-  if dbg.raw < 10 then
-    dbg.raw = dbg.raw + 1
-    WoWTranslate_Diag("WTC_RAW #" .. dbg.raw .. " ch=" .. ch ..
-      " sender=" .. tostring(sender) .. " text=" .. string.sub(msg, 1, 160))
-  end
-
-  counter = counter + 1
-  local mid = "m" .. counter
-  local ci = ChatTypeInfo[CHAT_TYPE[ch]]
-  pending[mid] = { sender = tostring(sender or ""), text = msg,
-                   r = ci and ci.r, g = ci and ci.g, b = ci and ci.b,
-                   t = GetTime(), done = false }
-  local ok = pcall(function()
-    local rr = WoWTranslate_Translate("\1" .. ch .. "\1" .. msg, "en", "zh", mid)
-    if rr ~= "ok" then
-      WoWTranslate_Diag("WTC_QUEUERR " .. tostring(rr))
-    end
-  end)
-  if not ok then
-    pending[mid] = nil
-  end
+  -- 过滤器已捕获过的（SeenMark/TryCapture 60s 窗口）→ 跳过
+  if SeenMark(ch, tostring(sender or ""), msg) then return end
+  TryCapture(ch, msg, sender, ChanLabel(ch, ...))
 end)
 
 -- ---- 轮询帧：Poll 译文 + 显示 + 超时兜底 ----
@@ -296,6 +295,7 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
     local id = JsonGetString(j, "id")
     local tr = JsonGetString(j, "translation") or ""
     local er = JsonGetString(j, "error") or ""
+    local otxt = JsonGetString(j, "orig") or ""
     -- 外发结果（out_N）：发英文（错误发原文）
     if id and string.sub(id, 1, 4) == "out_" then
       local o = outPending[id]
@@ -326,15 +326,22 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
         if dbg.ok <= 3 then
           WoWTranslate_Diag("WTC_TRANSOK id=" .. id)
         end
-        local line = ""
-        if p.sender ~= "" then
-          line = "|Hplayer:" .. p.sender .. "|h[" .. p.sender .. "]|h： "
-        end
-        line = line .. tr
-        if displayMode == "both" then
-          DisplayLine(dispPrefix .. line, p.r, p.g, p.b)
+        -- 中文回显去重：译文与归一化原文一致且原文未被压制（UI 已显示）
+        -- → 不重复显示（压制过的仍要显示，否则消息丢失）
+        if tr ~= "" and (tr == otxt or tr == p.text) and not p.suppressed then
+          -- skip
         else
-          DisplayLine(line, p.r, p.g, p.b)
+          local line = p.chanLabel or ""
+          if line ~= "" then line = line .. " " end
+          if p.sender ~= "" then
+            line = line .. "|Hplayer:" .. p.sender .. "|h[" .. p.sender .. "]|h： "
+          end
+          line = line .. tr
+          if displayMode == "both" then
+            DisplayLine(dispPrefix .. line, p.r, p.g, p.b)
+          else
+            DisplayLine(line, p.r, p.g, p.b)
+          end
         end
       end
       end

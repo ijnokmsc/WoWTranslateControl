@@ -224,15 +224,17 @@ WT_NOINLINE static int L_Translate(lua_State* L)
 // 译文 UTF-8 → GBK 后原样内嵌 JSON（Addon 的 JsonUnescape 按字节拷贝 → Lua 得 GBK 串）。
 WT_NOINLINE static int L_Poll_impl(lua_State* L)
 {
-    std::string id, trans, err;
-    if (!wt::Translator::Inst().Poll(id, trans, err))
+    std::string id, trans, err, orig;
+    if (!wt::Translator::Inst().Poll(id, trans, err, orig))
         return PushResult(L, "");
 
     // ⚠ 客户端是 UTF-8 通道（TriumvirateWoW AwesomeWotlk 补丁，用户 \ddd 字节探针实测：
     //   UTF-8「测试」正常显示、GBK「测试」全为 ?）。控制台端点输出即 UTF-8，原样透传。
+    // orig = 归一化后的原文（UTF-8），供驱动做中文回显去重。
     std::string out = "{\"id\":\"" + id + "\",\"translation\":\"" +
                       wt::JsonEscapeRaw(trans) +
-                      "\",\"error\":\"" + wt::JsonEscapeRaw(err) + "\"}";
+                      "\",\"error\":\"" + wt::JsonEscapeRaw(err) +
+                      "\",\"orig\":\"" + wt::JsonEscapeRaw(orig) + "\"}";
     return PushResult(L, out);
 }
 WT_NOINLINE static int L_Poll(lua_State* L)
@@ -917,8 +919,8 @@ extern "C" __declspec(dllexport) const char* __cdecl WoWTranslateDirect_Probe(co
     for (int i = 0; i < 350; ++i) // 最长等 35s
     {
         Sleep(100);
-        std::string id, tr, er;
-        if (wt::Translator::Inst().Poll(id, tr, er) && id == "probe")
+        std::string id, tr, er, og;
+        if (wt::Translator::Inst().Poll(id, tr, er, og) && id == "probe")
         {
             result += " trans=" + tr + " err=" + er;
             return result.c_str();

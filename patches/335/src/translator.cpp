@@ -240,7 +240,8 @@ bool Translator::Queue(const std::string& id, const std::string& textUtf8,
     return true;
 }
 
-bool Translator::Poll(std::string& idOut, std::string& transOut, std::string& errOut)
+bool Translator::Poll(std::string& idOut, std::string& transOut, std::string& errOut,
+                      std::string& origOut)
 {
     std::lock_guard<std::mutex> lk(m_qMx);
     if (m_results.empty()) return false;
@@ -249,6 +250,7 @@ bool Translator::Poll(std::string& idOut, std::string& transOut, std::string& er
     idOut = std::move(r.id);
     transOut = std::move(r.translation);
     errOut = std::move(r.error);
+    origOut = std::move(r.orig);
     return true;
 }
 
@@ -336,6 +338,7 @@ void Translator::WorkerLoop()
         {
             Result r;
             r.id = job.id;
+            r.orig = job.text;
             try
             {
                 // DLL 层缓存优先（省一次本地回环往返）

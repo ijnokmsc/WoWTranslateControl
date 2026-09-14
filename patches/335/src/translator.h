@@ -26,7 +26,8 @@ public:
                const std::string& from, const std::string& to, std::string& err);
 
     // 弹出一条完成结果（UTF-8 译文）
-    bool Poll(std::string& idOut, std::string& transOut, std::string& errOut);
+    bool Poll(std::string& idOut, std::string& transOut, std::string& errOut,
+               std::string& origOut);
 
     int  PendingCount();
     std::string StatusJsonUtf8();   // {"provider":..,"configured":..,"ready":..,"endpoint":..,"lastHttpStatus":N}
@@ -61,6 +62,7 @@ private:
         std::string id;
         std::string translation; // UTF-8
         std::string error;
+        std::string orig;        // 归一化后的原文（UTF-8），供回显去重
     };
 
     static ParsedUrl ParseUrl(const std::string& url);
