@@ -74,6 +74,18 @@ local outPending, outCounter = {}, 0
 local origSend = SendChatMessage
 local dbg = { raw = 0, own = 0, ok = 0, terr = 0, to = 0, oto = 0, chatEvt = 0 }
 
+-- UTF-8 文本的 CJK 检测（外发译文质检：翻译后的"英文"必须纯 ASCII 安全）
+local function HasCJKUtf8(t)
+  for i = 1, string.len(t) - 2 do
+    local b = string.byte(t, i)
+    if b >= 0xE4 and b <= 0xE9
+      and string.byte(t, i + 1) >= 0x80 and string.byte(t, i + 2) >= 0x80 then
+      return true
+    end
+  end
+  return false
+end
+
 local function HasCJK(t)
   -- GBK 与 UTF-8 的中文首字节均 >= 0x81，命中即视为含中文
   for i = 1, string.len(t) do
@@ -251,6 +263,8 @@ local function WTCSuppressFilter(chatFrame, event, msg, sender, ...)
     local newest, newestT
     for _, p in pairs(pending) do
       if p.sender == snd and not p.done and (newestT == nil or p.t > newestT) then
+)WTCDRIVER"
+R"WTCDRIVER(
         newest, newestT = p, p.t
       end
     end
@@ -338,8 +352,14 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
       if o then
         outPending[id] = nil
         local sendText = o.msg
-        -- 质检：zh→en 译文若仍含中文（模型方向失控）→ 视为失败发原文
-        if er == "" and tr ~= "" and not HasCJK(tr) then sendText = tr end
+        -- 质检：zh→en 译文若仍含 CJK（模型方向失控）→ 发英文提示。
+        -- 不发中文原文：对方可能是无中文字体的英文客户端（乱码）
+        if er == "" and tr ~= "" and not HasCJKUtf8(tr) then
+          sendText = tr
+        else
+          sendText = "[WTC]: translation failed"
+          WoWTranslate_Diag("WTC_ZH2EN_BAD id=" .. id .. " tr=" .. string.sub(tr, 1, 40))
+        end
         pcall(function() origSend(sendText, o.chatType, o.language, o.channel) end)
         dbg.ok = dbg.ok + 1
         if dbg.ok <= 3 then
@@ -402,7 +422,7 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
     if now - o.t > outTimeout then
       outPending[oid] = nil
       if outgoingMode == "replace" then
-        pcall(function() origSend(o.msg, o.chatType, o.language, o.channel) end)
+        pcall(function() origSend("[WTC]: translation failed", o.chatType, o.language, o.channel) end)
       end
       dbg.oto = dbg.oto + 1
       if dbg.oto <= 3 then
