@@ -47,12 +47,12 @@ public sealed class AppConfig
 
     public string SystemPrompt { get; set; } = DefaultSystemPrompt;
 
-    /// <summary>外发翻译（中文→英文）的系统提示词，与 DefaultSystemPrompt 成对。</summary>
+    /// <summary>
+    /// 外发翻译（中文→英文）的系统提示词。采用 Hy-MT 系列翻译模型的官方训练格式
+    /// （中文指令），英文指令会导致该模型偶发输出中文改写而非英文译文。
+    /// </summary>
     public const string DefaultSystemPromptZh2En =
-        "You are a World of Warcraft translator. Translate the given game chat " +
-        "from Chinese into English. Output ONLY the English translation, no explanation, " +
-        "no surrounding quotes. Preserve WoW hyperlink tags (|H...|h...|h, |c...|r) and " +
-        "placeholders like http://ph.wt/1 and ⟦G11⟧ exactly as-is.";
+        "把下面的文本翻译成英文，不要额外解释。";
 
     /// <summary>
     /// 单次请求的 token 上限。DLL 不发 max_tokens，不设上限时模型可能一直生成到耗尽上下文。

@@ -302,7 +302,8 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
       if o then
         outPending[id] = nil
         local sendText = o.msg
-        if er == "" and tr ~= "" then sendText = tr end
+        -- 质检：zh→en 译文若仍含中文（模型方向失控）→ 视为失败发原文
+        if er == "" and tr ~= "" and not HasCJK(tr) then sendText = tr end
         pcall(function() origSend(sendText, o.chatType, o.language, o.channel) end)
         dbg.ok = dbg.ok + 1
         if dbg.ok <= 3 then
