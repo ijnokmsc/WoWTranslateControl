@@ -166,6 +166,7 @@ end
 
 -- ---- 捕获去重查询：只查不标（标记由 TryCapture 负责）----
 -- v33 修复：SeenMark 先标后查会自吞事件帧自己的捕获（说/团队零捕获根因）
+local seen = {}
 local function SeenCheck(ch, sender, msg)
   local key = ch .. "|" .. tostring(sender) .. "|" .. msg
   return seen[key] and GetTime() - seen[key] < 60
