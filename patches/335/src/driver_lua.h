@@ -179,7 +179,7 @@ local function TryCapture(ch, msg, sender, chanLabel)
   end
   seen[key] = GetTime()
 
-  if dbg.raw < 10 then
+  if dbg.raw < 30 then
     dbg.raw = dbg.raw + 1
     WoWTranslate_Diag("WTC_RAW #" .. dbg.raw .. " ch=" .. ch ..
       " sender=" .. tostring(sender) .. " text=" .. string.sub(msg, 1, 160))
