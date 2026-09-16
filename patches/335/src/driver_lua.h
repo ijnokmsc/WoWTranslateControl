@@ -54,17 +54,14 @@ inline const char* DriverLuaCode()
 -- （v28 过滤器、v29 OnEvent/AddMessage 钩子在该客户端+聊天插件组合下均不触发。）
 -- 就绪门禁：FrameXML 未加载完时静默返回，C++ 侧 500ms 后重试。
 if not (not WTC_DRIVER_LOADED and NUM_CHAT_WINDOWS and DEFAULT_CHAT_FRAME and ChatFrame_OnEvent and ChatFrame1) then
-  -- v38 门禁探针：自定义客户端（Grimfall）零 diag 排查——记录哪个全局未就绪（最多 3 条）
-  if not WTC_GATE_MISS_N then WTC_GATE_MISS_N = 0 end
-  if WTC_GATE_MISS_N < 3 then
-    WTC_GATE_MISS_N = WTC_GATE_MISS_N + 1
-    WoWTranslate_Diag("WTC_GATE miss#" .. WTC_GATE_MISS_N ..
-      " loaded=" .. tostring(WTC_DRIVER_LOADED ~= nil) ..
-      " ncw=" .. tostring(NUM_CHAT_WINDOWS) ..
-      " dcf=" .. tostring(DEFAULT_CHAT_FRAME ~= nil) ..
-      " cfoe=" .. tostring(ChatFrame_OnEvent ~= nil) ..
-      " cf1=" .. tostring(ChatFrame1 ~= nil))
-  end
+  -- v39 门禁探针：只写全局变量（纯 Lua），由引擎在块返回后 getfield 裸读。
+  -- ⚠ 严禁在这里调 WoWTranslate_Diag：Grimfall 客户端校验嵌套 FrameScript_Execute
+  --   期间的 C 函数调用（ERROR #134 Invalid function pointer，v38 实测崩溃）。
+  WTC_GATE_INFO = "loaded=" .. tostring(WTC_DRIVER_LOADED ~= nil) ..
+    " ncw=" .. tostring(NUM_CHAT_WINDOWS) ..
+    " dcf=" .. tostring(DEFAULT_CHAT_FRAME ~= nil) ..
+    " cfoe=" .. tostring(ChatFrame_OnEvent ~= nil) ..
+    " cf1=" .. tostring(ChatFrame1 ~= nil)
 else
 WTC_DRIVER_LOADED = true
 
@@ -497,7 +494,7 @@ bannerFrame:SetScript("OnEvent", function()
     if acc < 1 then return end
     self:SetScript("OnUpdate", nil)
     if DEFAULT_CHAT_FRAME then
-      DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.0.0 by ijnokmsc (driver v38, mode=" ..
+      DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.0.0 by ijnokmsc (driver v39, mode=" ..
         displayMode .. ", outgoing=" .. outgoingMode .. ")")
     end
   end)

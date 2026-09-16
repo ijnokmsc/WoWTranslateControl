@@ -544,6 +544,7 @@ static volatile LONG g_driverDone = 0;            // 注入成功（或放弃）
 static volatile LONG g_driverBusy = 0;            // 重入保护（FrameScript_Execute 内部会再触发 gettop）
 static volatile LONG g_driverAttempts = 0;        // 重试计数
 static volatile DWORD g_driverNextTick = 0;       // 下次允许尝试的 tick（500ms 节流）
+static volatile LONG g_gateLogCount = 0;          // 门禁探针日志条数（最多 3 条）
 
 #define DRIVER_MAX_ATTEMPTS 600                   // 500ms 节流下约 5 分钟，足够等 FrameXML
 
@@ -622,6 +623,23 @@ static void TryInjectDriver(lua_State* L)
     }
 
     // 未就绪/未回报 → 保留 g_driverDone=0，下个空栈边界再试
+    // v39：读取门禁探针全局（纯 Lua 写入的 WTC_GATE_INFO，见 driver_lua.h）。
+    // 用注册同款的 getfield 裸读（Grimfall 实测安全），绝不调注册进 _G 的 API——
+    // 该客户端校验嵌套 FrameScript_Execute 期间的 C 函数调用（v38 崩溃根因）。
+    if (g_gateLogCount < 3 && p_getfield && p_tolstring && p_settop)
+    {
+        p_getfield(L, LUA_GLOBALSINDEX_L48, "WTC_GATE_INFO");
+        const char* gate = p_tolstring(L, -1, NULL);
+        if (gate && *gate)
+        {
+            ++g_gateLogCount;
+            char gbuf[256];
+            _snprintf(gbuf, sizeof(gbuf), "diag: WTC_GATE miss#%d %s",
+                      (int)g_gateLogCount, gate);
+            WT_LOG_INFO(gbuf);
+        }
+        p_settop(L, -2);   // 弹回探针值，恢复调用方栈
+    }
     InterlockedExchange(&g_driverBusy, 0);
     LONG n = InterlockedIncrement(&g_driverAttempts);
     if (n == 1 || n % 40 == 0)
