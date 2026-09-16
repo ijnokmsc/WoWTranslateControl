@@ -494,7 +494,7 @@ bannerFrame:SetScript("OnEvent", function()
     if acc < 1 then return end
     self:SetScript("OnUpdate", nil)
     if DEFAULT_CHAT_FRAME then
-      DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.0.0 by ijnokmsc (driver v39, mode=" ..
+      DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.0.0 by ijnokmsc (driver v40, mode=" ..
         displayMode .. ", outgoing=" .. outgoingMode .. ")")
     end
   end)

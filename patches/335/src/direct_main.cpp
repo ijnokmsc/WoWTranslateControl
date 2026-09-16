@@ -37,15 +37,49 @@ struct ClientProfile
     DWORD         base;        // 期望主模块基址
     DWORD         globalLPtr;  // 存放全局 lua_State* 的数据地址（detour 门禁用）
     DWORD         errHandler;  // FrameScript_Execute 的 a3（客户端静态错误处理器）
+    const char*   exeMd5Head;  // 客户端 exe 前 64KB 的 MD5 hex；null = 任意（签名字节相同的
+                               //   魔改客户端用指纹区分——如 Grimfall 带函数指针白名单守卫）
+    bool          caveStubs;   // true = 注册的 Lua C 函数走游戏 .text 代码洞跳板。
+                               //   Grimfall 的 luaD_call 校验被调函数必须在 Wow.exe .text
+                               //   内（ERROR #134 Invalid function pointer，IDA 0x86B5A0 实锤），
+                               //   外部 DLL 的函数指针直接 fatal；跳板让闭包持有一个
+                               //   白名单内的地址，实际执行 jmp 回本 DLL。
     LuaAddr       addrs[14];
 };
 
 static const ClientProfile kProfiles[] = {
     {
-        "wotlk-335a",           // 3.3.5a 基座（TriumvirateWoW / GrimfallWoW 实测同签名）
+        "grimfall-335a",        // GrimfallWoW：与通用 3.3.5a 签名相同，但带函数指针白名单
+        0x400000,
+        0xD3F78C,
+        0xAC804C,
+        "19B74B09224B875B1D848D2E44FFB511",   // exe 前 64KB MD5（v39 日志实测）
+        true,                                 // 需要 .text 代码洞跳板
+        {
+            { 0x84DBD0, "lua_gettop",       "UìMA+A", 12 },
+            { 0x84DBF0, "lua_settop",       "Uì", 3 },
+            { 0x84E350, "lua_pushstring",   "Uì", 3 },
+            { 0x84E400, "lua_pushcclosure", "Uì", 3 },
+            { 0x84E600, "lua_rawget",       "UìEVuÎè¯óÿÿ", 17 },
+            { 0x84E670, "lua_getfield",     "UìEVuÎè?óÿÿ", 17 },
+            { 0x84E8D0, "lua_settable",     "UìEVuÎèßðÿÿ", 17 },
+            { 0x84E0E0, "lua_tolstring",    "Uì", 3 },
+            { 0x84DF60, "lua_isstring",     "Uì", 3 },
+            { 0x84DF20, "lua_isnumber",     "Uì", 3 },
+            { 0x84E030, "lua_tonumber",     "Uì", 3 },
+            { 0x84E280, "lua_pushnil",      "Uì", 3 },
+            { 0x84EC50, "lua_pcall",        "Uì", 3 },
+            { 0x819210, "FrameScript_Execute", "Uì", 3 },
+        },
+    },
+    {
+        "wotlk-335a",           // 3.3.5a 基座通用画像（TriumvirateWoW 实测；指纹不匹配
+                                // Grimfall 时落到这里）
         0x400000,
         0xD3F78C,               // dword_D3F78C：FrameScript_Execute 内部使用的全局 L
         0xAC804C,               // 客户端静态错误处理器（sub_510B30 同款传参）
+        nullptr,                // 不限定指纹
+        false,                  // 无白名单守卫，不需要跳板
         {
             { 0x84DBD0, "lua_gettop",       "\x55\x8B\xEC\x8B\x4D\x08\x8B\x41\x0C\x2B\x41\x10", 12 },
             { 0x84DBF0, "lua_settop",       "\x55\x8B\xEC", 3 },
@@ -70,8 +104,8 @@ static const ClientProfile kProfiles[] = {
 };
 
 static const ClientProfile* g_prof = nullptr;   // VerifyAddresses 胜出者（此后只读）
+static char g_clientMd5Hex[33] = { 0 };          // 胜出画像的 exe 指纹（用于日志与画像匹配）
 
-// 按名字取当前画像中已验证的 VA；找不到返回 0（init 会拒绝全 0）
 static DWORD VaOf(const char* name)
 {
     if (!g_prof) return 0;
@@ -330,6 +364,94 @@ static RegEntry g_regs[] = {
     { "WoWTranslate_PendingCount", L_PendingCount },
     { "WoWTranslate_Diag",         L_Diag },
 };
+
+// ---------- 代码洞跳板（Grimfall 函数指针白名单适配） ----------
+// Grimfall 的 luaD_call 校验被调 C 函数必须位于 Wow.exe .text 内（IDA 0x86B5A0：
+// 区间来自解析主模块 PE 的 .text 节）。跳板 = 洞内 7 字节 `mov eax,real; jmp eax`，
+// Lua 闭包持有洞内地址（过白名单），真实实现在本 DLL。
+static DWORD g_stubVa[8] = { 0 };                // 与 g_regs 一一对应的跳板 VA
+
+static bool BuildCaveStubs()
+{
+    DWORD base = g_prof->base;
+    const BYTE* pe = (const BYTE*)(uintptr_t)base;
+    LONG e_lfanew = *(const LONG*)(pe + 0x3C);
+    const BYTE* nth = pe + e_lfanew;
+    WORD nsec = *(const WORD*)(nth + 6);
+    WORD optsz = *(const WORD*)(nth + 20);
+    const BYTE* sec = nth + 24 + optsz;
+    DWORD tStart = 0, tEnd = 0;
+    for (WORD i = 0; i < nsec; ++i)
+    {
+        const BYTE* s = sec + (DWORD)i * 40;
+        if (memcmp(s, ".text", 6) == 0)
+        {
+            DWORD va = *(const DWORD*)(s + 12);
+            tStart = base + va;
+            tEnd = tStart + *(const DWORD*)(s + 20);   // + SizeOfRawData（与守卫同款）
+            break;
+        }
+    }
+    if (!tStart)
+    {
+        WT_LOG_ERROR("cave stubs: .text section not found in game PE");
+        return false;
+    }
+
+    int built = 0;
+    DWORD runStart = 0, runLen = 0;
+    BYTE runByte = 0xCC;
+    for (DWORD p = tStart; p <= tEnd && built < 8; ++p)
+    {
+        BYTE b = (p < tEnd) ? *(const BYTE*)(uintptr_t)p : 0xFF;   // 结尾触发收尾
+        bool pad = (b == 0xCC || b == 0x00);
+        if (pad && runLen && b != runByte) pad = false;  // 换填充字节 → 结束当前 run
+        if (pad)
+        {
+            if (runLen == 0) { runStart = p; runByte = b; }
+            ++runLen;
+            continue;
+        }
+        if (runLen >= 8)
+        {
+            DWORD slots = runLen / 8;
+            for (DWORD j = 0; j < slots && built < 8; ++j)
+            {
+                DWORD cave = runStart + j * 8;
+                DWORD real = (DWORD)(uintptr_t)g_regs[built].fn;
+                BYTE stub[7] = { 0xB8 };                   // mov eax, imm32
+                *(DWORD*)(stub + 1) = real;
+                stub[5] = 0xFF; stub[6] = 0xE0;            // jmp eax
+                DWORD oldProt = 0;
+                if (!VirtualProtect((LPVOID)(uintptr_t)cave, 8, PAGE_EXECUTE_READWRITE, &oldProt))
+                {
+                    WT_LOG_ERROR("cave stubs: VirtualProtect failed");
+                    return false;
+                }
+                memcpy((void*)(uintptr_t)cave, stub, 7);
+                FlushInstructionCache(GetCurrentProcess(), (LPCVOID)(uintptr_t)cave, 8);
+                VirtualProtect((LPVOID)(uintptr_t)cave, 8, oldProt, &oldProt);
+                g_stubVa[built] = cave;
+                ++built;
+            }
+        }
+        runLen = 0;
+    }
+    if (built < 8)
+    {
+        WT_LOG_ERROR("cave stubs: not enough padding caves in game .text");
+        return false;
+    }
+    for (int i = 0; i < 8; ++i)
+        g_regs[i].fn = (lua_CFunction)(uintptr_t)g_stubVa[i];   // 注册表换成洞内地址
+    char buf[96];
+    _snprintf(buf, sizeof(buf), "cave stubs: 8 built (first @ 0x%08X in game .text)", g_stubVa[0]);
+    WT_LOG_INFO(buf);
+    return true;
+}
+
+// 按名字取当前画像中已验证的 VA；找不到返回 0（init 会拒绝全 0）
+
 
 // 在 detour（Lua 主线程）内调用。v13 定案（2026-09-12，用户实测背书）：
 // 结构探针（TValue 直读）→ 尝试 A（官方模式：gt TValue 压栈 + settable(-3)）→ 返回成功。
@@ -817,6 +939,14 @@ static bool VerifyAddresses()
                   "client fingerprint: size=%llu md5[64K]=%s exe=%s",
                   fsize, md5head.c_str(), exePath);
         WT_LOG_INFO(buf);
+        // 归一为紧凑 hex 存全局（画像指纹匹配用）
+        {
+            const char* src = md5head.c_str();
+            int o = 0;
+            for (int i = 0; src[i] && o < 32; ++i)
+                if (src[i] != ' ') g_clientMd5Hex[o++] = src[i];
+            g_clientMd5Hex[32] = 0;
+        }
     }
 
     char buf[128];
@@ -831,6 +961,13 @@ static bool VerifyAddresses()
         {
             _snprintf(buf, sizeof(buf), "profile %s: base 0x%08X != module, skip",
                       prof.name, prof.base);
+            WT_LOG_INFO(buf);
+            continue;
+        }
+        if (prof.exeMd5Head && strcmp(g_clientMd5Hex, prof.exeMd5Head) != 0)
+        {
+            _snprintf(buf, sizeof(buf), "profile %s: fingerprint mismatch (got %s), skip",
+                      prof.name, g_clientMd5Hex);
             WT_LOG_INFO(buf);
             continue;
         }
@@ -953,6 +1090,13 @@ static DWORD WINAPI InitThread(LPVOID)
     p_isnumber     = (fn_lua_isnumber)VaOf("lua_isnumber");
     p_tonumber     = (fn_lua_tonumber)VaOf("lua_tonumber");
     p_Execute      = (fn_FrameScript_Execute)VaOf("FrameScript_Execute");  // 主线程专用
+
+    // Grimfall 类客户端：注册函数必须住在游戏 .text 内（函数指针白名单）
+    if (g_prof->caveStubs && !BuildCaveStubs())
+    {
+        WT_LOG_ERROR("init aborted: cave stubs unavailable");
+        return 1;
+    }
 
     // v16 驱动块：配置前缀（WTC 全局表）+ 驱动 Lua，注册成功后主线程注入
     RebuildDriverChunk();
