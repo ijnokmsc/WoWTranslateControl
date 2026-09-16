@@ -1,7 +1,7 @@
 // direct_main.cpp — WoWTranslateDirect.dll 入口：hook lua_gettop → 一次性捕获 L → 注册 WoWTranslate_*
 //
 // 机制对齐 GS DLL（决定版地址表，三源互证 2026-09-11）：
-//   1. init 线程 sleep 3s 等客户端就绪 → 字节码序言校验 → 内联 hook lua_gettop(0x84DBD0)；
+//   1. init 线程 sleep 3s 等客户端就绪 → 画像匹配（基址+签名）→ 内联 hook lua_gettop；
 //   2. detour 一次性捕获第一参数 lua_State*（UI 主状态），注册后永久直通；
 //   3. lua_pushcclosure + lua_setfield(_G) 注册 WoWTranslate_{Version,GetLastError,Status,Configure,
 //      Translate,Poll,PendingCount,Diag}；
@@ -14,35 +14,72 @@
 #include "json.hpp"   // third_party/json.hpp（translator.cpp 同款）
 using json = nlohmann::json;
 
-// ==================== 3.3.5a 决定版地址表（默认基址 0x400000）====================
-
-static const DWORD DEFAULT_BASE = 0x400000;
-
-struct LuaAddr { DWORD va; const char* name; const char* sig; int sigLen; };
-
+// ==================== 客户端画像（多版本适配架构，3.0）====================
+//
+// 适配单元 = ClientProfile：一个客户端构建的全部地址知识（基址、全局 lua_State
+// 存放位置、FrameScript_Execute 错误处理器、Lua API 的 VA+序言签名表）。
+// 运行时流程：init 线程枚举内置画像 → 逐个校验（模块基址 + 全部签名字节）→
+// 首个全匹配者胜出；无一匹配则安全退出（不 hook），日志留下 exe 指纹
+// （大小 + 前 64KB MD5 + PE 时间戳），新客户端照指纹补画像即可。
+//
+// 实测（tools_probe_multi.py，2026-09-14）：TriumvirateWoW 与 GrimfallWoW\Wotlk
+// 两个 exe 文件哈希不同（大小相同、PE 时间戳相同），但下表 14/14 签名全匹配
+// ——同一 3.3.5a 基座的不同魔改共用一个画像。
+//
 // sig = 序言字节签名（GS 日志 + exe 字节双源确认；其余函数至少验证 "55 8B" 标准序言）
 // ⚠ getfield/settable/rawget 前 11 字节完全相同（55 8B EC 8B 45 0C 56 8B 75 08 8B CE），
 //   必须用 17 字节（含 call rel32）才能区分——2026-09-12 IDA get_bytes 定案。
-static LuaAddr g_addrs[] = {
-    { 0x84DBD0, "lua_gettop",       "\x55\x8B\xEC\x8B\x4D\x08\x8B\x41\x0C\x2B\x41\x10", 12 },
-    { 0x84DBF0, "lua_settop",       "\x55\x8B\xEC", 3 },
-    { 0x84E350, "lua_pushstring",   "\x55\x8B\xEC", 3 },
-    { 0x84E400, "lua_pushcclosure", "\x55\x8B\xEC", 3 },
-    { 0x84E600, "lua_rawget",       "\x55\x8B\xEC\x8B\x45\x0C\x56\x8B\x75\x08\x8B\xCE\xE8\xAF\xF3\xFF\xFF", 17 },
-    { 0x84E670, "lua_getfield",     "\x55\x8B\xEC\x8B\x45\x0C\x56\x8B\x75\x08\x8B\xCE\xE8\x3F\xF3\xFF\xFF", 17 },
-    // 真 settable = 0x84E8D0（wow_register 内部 call 目标，push (L, idx) 两参 cdecl）。
-    //   PyWoW 表的 0x84E670 实为 lua_getfield（曾致 16-slot 泄漏崩溃）；0x84E600 是 lua_rawget。
-    { 0x84E8D0, "lua_settable",     "\x55\x8B\xEC\x8B\x45\x0C\x56\x8B\x75\x08\x8B\xCE\xE8\xDF\xF0\xFF\xFF", 17 },
-    { 0x84E0E0, "lua_tolstring",    "\x55\x8B\xEC", 3 },
-    { 0x84DF60, "lua_isstring",     "\x55\x8B\xEC", 3 },
-    { 0x84DF20, "lua_isnumber",     "\x55\x8B\xEC", 3 },
-    { 0x84E030, "lua_tonumber",     "\x55\x8B\xEC", 3 },
-    { 0x84E280, "lua_pushnil",      "\x55\x8B\xEC", 3 },
-    { 0x84EC50, "lua_pcall",        "\x55\x8B\xEC", 3 },
-    // FrameScript_Execute（/run 实现，IDA dump 0x819210）：__cdecl (code, len, errHandler)
-    // 内部自带全局 L（dword_D3F78C）、registry 错误处理器保存恢复、栈平衡。
-    { 0x819210, "FrameScript_Execute", "\x55\x8B\xEC", 3 },
+struct LuaAddr { DWORD va; const char* name; const char* sig; int sigLen; };
+
+struct ClientProfile
+{
+    const char*   name;        // 画像名（进日志）
+    DWORD         base;        // 期望主模块基址
+    DWORD         globalLPtr;  // 存放全局 lua_State* 的数据地址（detour 门禁用）
+    DWORD         errHandler;  // FrameScript_Execute 的 a3（客户端静态错误处理器）
+    LuaAddr       addrs[14];
 };
+
+static const ClientProfile kProfiles[] = {
+    {
+        "wotlk-335a",           // 3.3.5a 基座（TriumvirateWoW / GrimfallWoW 实测同签名）
+        0x400000,
+        0xD3F78C,               // dword_D3F78C：FrameScript_Execute 内部使用的全局 L
+        0xAC804C,               // 客户端静态错误处理器（sub_510B30 同款传参）
+        {
+            { 0x84DBD0, "lua_gettop",       "\x55\x8B\xEC\x8B\x4D\x08\x8B\x41\x0C\x2B\x41\x10", 12 },
+            { 0x84DBF0, "lua_settop",       "\x55\x8B\xEC", 3 },
+            { 0x84E350, "lua_pushstring",   "\x55\x8B\xEC", 3 },
+            { 0x84E400, "lua_pushcclosure", "\x55\x8B\xEC", 3 },
+            { 0x84E600, "lua_rawget",       "\x55\x8B\xEC\x8B\x45\x0C\x56\x8B\x75\x08\x8B\xCE\xE8\xAF\xF3\xFF\xFF", 17 },
+            { 0x84E670, "lua_getfield",     "\x55\x8B\xEC\x8B\x45\x0C\x56\x8B\x75\x08\x8B\xCE\xE8\x3F\xF3\xFF\xFF", 17 },
+            // 真 settable = 0x84E8D0（wow_register 内部 call 目标，push (L, idx) 两参 cdecl）。
+            //   PyWoW 表的 0x84E670 实为 lua_getfield（曾致 16-slot 泄漏崩溃）；0x84E600 是 lua_rawget。
+            { 0x84E8D0, "lua_settable",     "\x55\x8B\xEC\x8B\x45\x0C\x56\x8B\x75\x08\x8B\xCE\xE8\xDF\xF0\xFF\xFF", 17 },
+            { 0x84E0E0, "lua_tolstring",    "\x55\x8B\xEC", 3 },
+            { 0x84DF60, "lua_isstring",     "\x55\x8B\xEC", 3 },
+            { 0x84DF20, "lua_isnumber",     "\x55\x8B\xEC", 3 },
+            { 0x84E030, "lua_tonumber",     "\x55\x8B\xEC", 3 },
+            { 0x84E280, "lua_pushnil",      "\x55\x8B\xEC", 3 },
+            { 0x84EC50, "lua_pcall",        "\x55\x8B\xEC", 3 },
+            // FrameScript_Execute（/run 实现，IDA dump 0x819210）：__cdecl (code, len, errHandler)
+            // 内部自带全局 L（profile.globalLPtr）、registry 错误处理器保存恢复、栈平衡。
+            { 0x819210, "FrameScript_Execute", "\x55\x8B\xEC", 3 },
+        },
+    },
+};
+
+static const ClientProfile* g_prof = nullptr;   // VerifyAddresses 胜出者（此后只读）
+
+// 按名字取当前画像中已验证的 VA；找不到返回 0（init 会拒绝全 0）
+static DWORD VaOf(const char* name)
+{
+    if (!g_prof) return 0;
+    for (int i = 0; i < 14; ++i)
+        if (strcmp(g_prof->addrs[i].name, name) == 0)
+            return g_prof->addrs[i].va;
+    return 0;
+}
 
 // ==================== Lua API 函数指针（cdecl）====================
 
@@ -91,7 +128,7 @@ static fn_FrameScript_Execute p_Execute;   // 0x819210（主线程专用，见 T
 static void*  g_origBytes;        // 被覆盖的原始字节（6 字节）
 static BYTE   g_trampoline[16];   // 原始 6 字节 + JMP 回原址+6
 static void*  g_pTrampoline = g_trampoline;
-static BYTE*  g_hookTarget = NULL; // 0x84DBD0 实际地址
+static BYTE*  g_hookTarget = NULL; // 画像 lua_gettop 实际地址
 
 static volatile LONG  g_hookInstalled = 0;
 static volatile LONG  g_attemptCount = 0;
@@ -418,7 +455,7 @@ WT_NOINLINE static int TryRegister(lua_State* L)
 // detour 辅助（在 Lua 主线程上跑，必须快、无分配、异常兜底）
 //
 // ⚠ 决定性设计（IDA 实锤 + 日志教训）：
-// 1. 全局 L 门禁：0xD3F78C = 客户端全局 lua_State（FrameScript_Execute 用它跑 /run，
+// 1. 全局 L 门禁：profile.globalLPtr = 客户端全局 lua_State 存放处（FrameScript_Execute 用它跑 /run，
 //    反编译铁证）。只在捕获 L == 该指针时注册 —— 客户端存在多个内部辅助状态
 //    （日志实测 0x270083F8/0x3E8AB4F0 交替调 gettop），对它们注册纯属浪费且
 //    会让 attempts 计数虚耗在错误目标上，/run 的 UI 状态反而轮不到。
@@ -427,7 +464,7 @@ WT_NOINLINE static int TryRegister(lua_State* L)
 // 3. /reload 与重登：全局 L 指针变化 → 自动重置计数重走注册。
 static lua_State* volatile g_globalL = NULL;      // 已注册的全局状态
 static lua_State* volatile g_confirmedL = NULL;   // 已见 depth>0（真实脚本执行）的全局状态
-static lua_State* volatile g_seenGlobalL = NULL;  // 上次观察到的 *(0xD3F78C)，用于状态切换日志
+static lua_State* volatile g_seenGlobalL = NULL;  // 上次观察到的 *(profile.globalLPtr)，用于状态切换日志
 static volatile LONG g_registerDone = 0;
 
 // ==================== v16：驱动 Lua 注入（全自治模式）====================
@@ -510,11 +547,10 @@ static volatile DWORD g_driverNextTick = 0;       // 下次允许尝试的 tick�
 
 #define DRIVER_MAX_ATTEMPTS 600                   // 500ms 节流下约 5 分钟，足够等 FrameXML
 
-// 客户端 /run 处理器（sub_510B30）的同款传法：sub_819210(code, code, 0xAC804C)
+// 客户端 /run 处理器（sub_510B30）的同款传法：sub_819210(code, code, errHandler)
 // —— a2 是 luaL_loadbuffer 的 chunk 名（客户端直接复用代码指针），传别的值时任何
 // Lua 错误消息格式化都会把它当 char* 解引用 → AV（v16 崩溃根因之一）；
-// a3 是客户端静态错误处理器指针，原样照抄。
-#define FRAME_SCRIPT_ERR_HANDLER 0xAC804C
+// a3 是客户端静态错误处理器指针，原样照抄（取自当前客户端画像 profile.errHandler）。
 
 // SEH 执行体单独成函数（C2712：__try 所在函数禁止 std::string 临时量等需展开对象）
 static int ExecuteDriverChunk()
@@ -524,7 +560,7 @@ static int ExecuteDriverChunk()
     {
         rc = p_Execute(g_driverChunk.c_str(),
                        (int)(intptr_t)g_driverChunk.c_str(),   // a2 = chunk 名（客户端同款：复用代码指针）
-                       FRAME_SCRIPT_ERR_HANDLER);
+                       (int)(intptr_t)g_prof->errHandler);
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
     {
@@ -611,7 +647,7 @@ static void OnGetTop(lua_State* L)
         return;
     }
 
-    lua_State* cur = *(lua_State**)0xD3F78C;        // 客户端全局 lua_State
+    lua_State* cur = *(lua_State**)(uintptr_t)g_prof->globalLPtr;   // 全局 lua_State（画像）
     if (!cur || L != cur) return;                   // 内部辅助状态 → 一律不碰
 
     // 全局状态切换追踪（胶水态 → 世界态 → /reload 重建等）
@@ -736,31 +772,85 @@ static bool VerifyAddresses()
     if (!base) return false;
     DWORD actualBase = (DWORD)(uintptr_t)base;
 
-    char buf[128];
-    _snprintf(buf, sizeof(buf), "module base=0x%08X (default 0x%08X)", actualBase, DEFAULT_BASE);
-    WT_LOG_INFO(buf);
-    if (actualBase != DEFAULT_BASE)
+    // exe 指纹：大小 + 前 64KB MD5 + 路径（新客户端补画像的依据）
     {
-        WT_LOG_ERROR("unexpected module base - address table needs rebasing, aborting");
-        return false;
+        char exePath[MAX_PATH] = { 0 };
+        GetModuleFileNameA(NULL, exePath, MAX_PATH);
+        unsigned long long fsize = 0;
+        std::string md5head;
+        HANDLE h = CreateFileA(exePath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                               NULL, OPEN_EXISTING, 0, NULL);
+        if (h != INVALID_HANDLE_VALUE)
+        {
+            LARGE_INTEGER sz;
+            if (GetFileSizeEx(h, &sz)) fsize = (unsigned long long)sz.QuadPart;
+            static BYTE head[64 * 1024];
+            DWORD rd = 0;
+            if (ReadFile(h, head, sizeof(head), &rd, NULL) && rd > 0)
+            {
+                BYTE digest[16];
+                if (wt::Md5(head, rd, digest))
+                    md5head = HexStr(digest, 16);
+            }
+            CloseHandle(h);
+        }
+        char buf[400];
+        _snprintf(buf, sizeof(buf),
+                  "client fingerprint: size=%llu md5[64K]=%s exe=%s",
+                  fsize, md5head.c_str(), exePath);
+        WT_LOG_INFO(buf);
     }
 
-    for (int i = 0; i < (int)(sizeof(g_addrs) / sizeof(g_addrs[0])); ++i)
+    char buf[128];
+    _snprintf(buf, sizeof(buf), "module base=0x%08X", actualBase);
+    WT_LOG_INFO(buf);
+
+    // 枚举内置画像：基址一致 + 全部签名匹配者胜出
+    for (int pi = 0; pi < (int)(sizeof(kProfiles) / sizeof(kProfiles[0])); ++pi)
     {
-        BYTE* p = (BYTE*)g_addrs[i].va;
-        if (IsBadReadPtr(p, g_addrs[i].sigLen))
+        const ClientProfile& prof = kProfiles[pi];
+        if (actualBase != prof.base)
         {
-            WT_LOG_ERROR(std::string("unreadable: ") + g_addrs[i].name);
-            return false;
+            _snprintf(buf, sizeof(buf), "profile %s: base 0x%08X != module, skip",
+                      prof.name, prof.base);
+            WT_LOG_INFO(buf);
+            continue;
         }
-        if (memcmp(p, g_addrs[i].sig, g_addrs[i].sigLen) != 0)
+
+        bool all = true;
+        for (int i = 0; i < 14 && all; ++i)
         {
-            WT_LOG_ERROR(std::string("sig mismatch: ") + g_addrs[i].name +
-                         " got " + HexStr(p, g_addrs[i].sigLen));
-            return false;
+            BYTE* p = (BYTE*)prof.addrs[i].va;
+            if (IsBadReadPtr(p, prof.addrs[i].sigLen))
+            {
+                WT_LOG_ERROR(std::string("profile ") + prof.name + " unreadable: " +
+                             prof.addrs[i].name);
+                all = false;
+                break;
+            }
+            if (memcmp(p, prof.addrs[i].sig, prof.addrs[i].sigLen) != 0)
+            {
+                WT_LOG_ERROR(std::string("profile ") + prof.name + " sig mismatch: " +
+                             prof.addrs[i].name + " got " + HexStr(p, prof.addrs[i].sigLen));
+                all = false;
+                break;
+            }
+        }
+        if (all)
+        {
+            g_prof = &prof;
+            break;
         }
     }
-    WT_LOG_INFO("all lua function signatures verified");
+
+    if (!g_prof)
+    {
+        WT_LOG_ERROR("no client profile matched - not hooking (see fingerprint above)");
+        return false;
+    }
+    _snprintf(buf, sizeof(buf), "client profile matched: %s (all lua signatures verified)",
+              g_prof->name);
+    WT_LOG_INFO(buf);
     return true;
 }
 
@@ -832,25 +922,25 @@ static DWORD WINAPI InitThread(LPVOID)
         return 1;
     }
 
-    // 解析函数指针（已验证基址 == 默认 → VA 即实际地址）
-    p_gettop       = (fn_lua_gettop)0x84DBD0;
-    p_pushstring   = (fn_lua_pushstring)0x84E350;
-    p_pushcclosure = (fn_lua_pushcclosure)0x84E400;
-    p_settable     = (fn_lua_settable)0x84E8D0;
-    p_rawget       = (fn_lua_rawget)0x84E600;     // 裸读（不走 __index）
-    p_getfield     = (fn_lua_getfield)0x84E670;   // 裸读压 1（自检/探针用）
-    p_settop       = (fn_lua_settop)0x84DBF0;
-    p_tolstring    = (fn_lua_tolstring)0x84E0E0;
-    p_isstring     = (fn_lua_isstring)0x84DF60;
-    p_isnumber     = (fn_lua_isnumber)0x84DF20;
-    p_tonumber     = (fn_lua_tonumber)0x84E030;
-    p_Execute      = (fn_FrameScript_Execute)0x819210;  // 主线程专用（TryInjectDriver）
+    // 解析函数指针（VerifyAddresses 已选出画像 → VA 即实际地址）
+    p_gettop       = (fn_lua_gettop)VaOf("lua_gettop");
+    p_pushstring   = (fn_lua_pushstring)VaOf("lua_pushstring");
+    p_pushcclosure = (fn_lua_pushcclosure)VaOf("lua_pushcclosure");
+    p_settable     = (fn_lua_settable)VaOf("lua_settable");
+    p_rawget       = (fn_lua_rawget)VaOf("lua_rawget");       // 裸读（不走 __index）
+    p_getfield     = (fn_lua_getfield)VaOf("lua_getfield");   // 裸读压 1（自检/探针用）
+    p_settop       = (fn_lua_settop)VaOf("lua_settop");
+    p_tolstring    = (fn_lua_tolstring)VaOf("lua_tolstring");
+    p_isstring     = (fn_lua_isstring)VaOf("lua_isstring");
+    p_isnumber     = (fn_lua_isnumber)VaOf("lua_isnumber");
+    p_tonumber     = (fn_lua_tonumber)VaOf("lua_tonumber");
+    p_Execute      = (fn_FrameScript_Execute)VaOf("FrameScript_Execute");  // 主线程专用
 
     // v16 驱动块：配置前缀（WTC 全局表）+ 驱动 Lua，注册成功后主线程注入
     RebuildDriverChunk();
 
     // 保存 gettop 原 6 字节（gettop 签名前 6 字节，指令边界：push ebp / mov ebp,esp / mov ecx,[ebp+8]）
-    g_hookTarget = (BYTE*)0x84DBD0;
+    g_hookTarget = (BYTE*)VaOf("lua_gettop");
     static BYTE orig[6];
     memcpy(orig, g_hookTarget, 6);
     g_origBytes = orig;

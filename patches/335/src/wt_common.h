@@ -3,6 +3,8 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <wincrypt.h>
+#pragma comment(lib, "advapi32.lib")
 #include <string>
 
 namespace wt {
@@ -112,6 +114,27 @@ inline std::string JsonEscapeRaw(const std::string& s)
         }
     }
     return out;
+}
+
+// ==================== MD5（exe 指纹用，CryptoAPI） ====================
+// 供 direct_main 的客户端画像匹配记录指纹：size + md5(前 64KB)。
+inline bool Md5(const void* data, size_t len, unsigned char out[16])
+{
+    HCRYPTPROV hProv = 0;
+    HCRYPTHASH hHash = 0;
+    bool ok = false;
+    if (CryptAcquireContextW(&hProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT))
+    {
+        if (CryptCreateHash(hProv, CALG_MD5, 0, 0, &hHash))
+        {
+            DWORD n = 16;
+            ok = CryptHashData(hHash, (const BYTE*)data, (DWORD)len, 0) &&
+                 CryptGetHashParam(hHash, HP_HASHVAL, out, &n, 0) && n == 16;
+            CryptDestroyHash(hHash);
+        }
+        CryptReleaseContext(hProv, 0);
+    }
+    return ok;
 }
 
 } // namespace wt
