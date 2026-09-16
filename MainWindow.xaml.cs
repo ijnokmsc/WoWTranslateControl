@@ -922,8 +922,9 @@ public partial class MainWindow : Window
                 Directory.Exists(gameDir) && File.Exists(Path.Combine(gameDir, "Wow.exe")))
             {
                 Core.DllSwitcher.WriteDirectConfig(gameDir, _cfg.ListenPort,
-                    _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix, _cfg.DirectOutgoingMode);
-                Log($"已更新游戏目录 WoWTranslateDirect.json（displayMode={_cfg.DirectDisplayMode}，outgoing={_cfg.DirectOutgoingMode}，游戏内 /reload 生效）");
+                    _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix, _cfg.DirectOutgoingMode,
+                    dllLog: _cfg.DllLogEnabled);
+                Log($"已更新游戏目录 WoWTranslateDirect.json（displayMode={_cfg.DirectDisplayMode}，outgoing={_cfg.DirectOutgoingMode}，log={_cfg.DllLogEnabled}，游戏内 /reload 生效）");
             }
         }
         catch (Exception ex)

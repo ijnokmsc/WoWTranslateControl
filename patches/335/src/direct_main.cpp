@@ -86,7 +86,10 @@ static const ClientProfile kProfiles[] = {
         0xD3F78C,               // dword_D3F78C：FrameScript_Execute 内部使用的全局 L
         0xAC804C,               // 客户端静态错误处理器（sub_510B30 同款传参）
         nullptr,                // 不限定指纹
-        false,                  // 无白名单守卫，不需要跳板
+        true,                   // ⚠ 默认启用跳板：野外已出现带函数指针白名单的同源加固
+                                //   构建（2026-09-16 分布式用户 ERROR #134 崩溃，守卫 RVA
+                                //   与 Grimfall 完全一致）。跳板在无守卫客户端上无害
+                                //   （padding 洞本就不执行），有守卫客户端上是唯一活路
         kAddrs335,
     },
 };
