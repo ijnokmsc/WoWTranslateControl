@@ -25,27 +25,6 @@ public sealed class TrafficRow
     public string? Channel { get; init; }
 }
 
-/// <summary>规则命中统计行。</summary>
-public sealed class RuleStatRow : System.ComponentModel.INotifyPropertyChanged
-{
-    public string RuleId { get; init; } = "";
-    public string RuleName { get; init; } = "";
-    public long Count { get; set; }
-    public double BarWidth { get; set; }
-    public string CountText { get; set; } = "";
-
-    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
-    public void Refresh(long max)
-    {
-        CountText = Count.ToString();
-        BarWidth = max <= 0 ? 0 : Math.Min(1.0, Count / (double)max) * 320;
-        PropertyChanged?.Invoke(this,
-            new System.ComponentModel.PropertyChangedEventArgs(nameof(CountText)));
-        PropertyChanged?.Invoke(this,
-            new System.ComponentModel.PropertyChangedEventArgs(nameof(BarWidth)));
-    }
-}
-
 public partial class MainWindow : Window
 {
     private AppConfig _cfg = new();
@@ -56,8 +35,6 @@ public partial class MainWindow : Window
 
     private readonly ObservableCollection<TrafficRow> _allRows = new();
     private readonly ObservableCollection<TrafficRow> _view = new();
-    private readonly ObservableCollection<RuleStatRow> _ruleStats = new();
-    private readonly Dictionary<string, long> _ruleHits = new();
 
     private readonly DispatcherTimer _uiTimer;
     private readonly DispatcherTimer _clockTimer;
@@ -89,12 +66,6 @@ public partial class MainWindow : Window
 
         _cfg = AppConfig.Load();
         TrafficGrid.ItemsSource = _view;
-        RuleStatsList.ItemsSource = _ruleStats;
-
-        foreach (var (key, name, _) in AppConfig.RuleCatalog)
-            _ruleStats.Add(new RuleStatRow { RuleId = key.Replace("Rule", "R"), RuleName = name });
-        foreach (var (ruleId, _, cnName, _) in AppConfig.ChannelCatalog)
-            _ruleStats.Add(new RuleStatRow { RuleId = ruleId, RuleName = $"{cnName}频道" });
 
         LoadConfigToUi();
 
@@ -209,12 +180,6 @@ public partial class MainWindow : Window
 
         ChkAutoStart.IsChecked = _cfg.AutoStartLlama && _cfg.ProxyAutoStart;
         ChkOnlyChannel.IsChecked = _cfg.TrafficOnlyChannel;
-        ChkR1.IsChecked = _cfg.RuleIconSpam;
-        ChkR2.IsChecked = _cfg.RuleSpellLog;
-        ChkR3.IsChecked = _cfg.RuleCombatOther;
-        ChkR4.IsChecked = _cfg.RuleLoot;
-        ChkR5.IsChecked = _cfg.RuleDamageDeath;
-        ChkR6.IsChecked = _cfg.RuleChineseOnly;
         ChkCache.IsChecked = _cfg.CacheEnabled;
 
         // 频道过滤
@@ -255,9 +220,6 @@ public partial class MainWindow : Window
             if ((string)item.Tag == _cfg.DirectOutgoingMode) { CmbDirectOutgoing.SelectedItem = item; break; }
 
         _suppressSlider = true;
-        SliderRatio.Value = _cfg.ChineseRatioLimit;
-        _suppressSlider = false;
-        RatioText.Text = _cfg.ChineseRatioLimit.ToString("0.0");
 
         ProxyPortText.Text = $" :{_cfg.ListenPort} → :{_cfg.UpstreamPort}";
     }
@@ -437,20 +399,6 @@ public partial class MainWindow : Window
 
     // ==================== 规则开关 ====================
 
-    private void Rule_Changed(object sender, RoutedEventArgs e)
-    {
-        if (!IsLoaded) return;
-        _cfg.RuleIconSpam = ChkR1.IsChecked == true;
-        _cfg.RuleSpellLog = ChkR2.IsChecked == true;
-        _cfg.RuleCombatOther = ChkR3.IsChecked == true;
-        _cfg.RuleLoot = ChkR4.IsChecked == true;
-        _cfg.RuleDamageDeath = ChkR5.IsChecked == true;
-        _cfg.RuleChineseOnly = ChkR6.IsChecked == true;
-        SaveProviderFromUi();
-        _cfg.Save();
-    }
-
-    // ==================== 频道过滤 ====================
 
     private void Channel_Changed(object sender, RoutedEventArgs e)
     {
@@ -508,7 +456,7 @@ public partial class MainWindow : Window
         SaveProviderFromUi();
         _cfg.Save();
         BtnTestProvider.IsEnabled = false;
-        TxtPluginReport.Text = "正在测试翻译服务…";
+        Log("正在测试翻译服务…");
         try
         {
             var manager = new Core.Providers.ProviderManager(_cfg);
@@ -516,9 +464,9 @@ public partial class MainWindow : Window
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var reply = await manager.TranslateAsync(ctx, CancellationToken.None);
             sw.Stop();
-            TxtPluginReport.Text = reply.Ok
-                ? $"✅ 测试通过（{manager.PrimaryId}，{sw.ElapsedMilliseconds}ms）：{reply.Translated}"
-                : $"❌ 测试失败：{reply.Error}";
+            Log(reply.Ok
+                ? $"✅ 翻译服务测试通过（{manager.PrimaryId}，{sw.ElapsedMilliseconds}ms）：{reply.Translated}"
+                : $"❌ 翻译服务测试失败：{reply.Error}");
             Log($"翻译服务测试：{(reply.Ok ? "成功" : "失败")} {reply.Error}");
         }
         finally
@@ -539,24 +487,6 @@ public partial class MainWindow : Window
             TxtGameDir.Text = dlg.FolderName;
     }
 
-    private void BtnConfigurePlugin_Click(object sender, RoutedEventArgs e)
-    {
-        SaveProviderFromUi();
-        _cfg.GameDir = TxtGameDir.Text.Trim();
-        _cfg.Save();
-
-        var configurator = new Core.PluginConfigurator(_cfg);
-        var report = configurator.Configure(_cfg.GameDir,
-            ChkPatchLua.IsChecked == true, ChkSyncChannels.IsChecked == true);
-        TxtPluginReport.Text = string.Join("\n", report.Lines);
-        foreach (var line in report.Lines) Log(line);
-        MessageBox.Show(this, string.Join("\n", report.Lines), "插件一键配置",
-            MessageBoxButton.OK,
-            report.Ok ? MessageBoxImage.Information : MessageBoxImage.Warning);
-    }
-
-    // ==================== 下载向导（需求 9） ====================
-
     private void BtnWizard_Click(object sender, RoutedEventArgs e)
     {
         ReadConfigFromUi();
@@ -574,17 +504,6 @@ public partial class MainWindow : Window
     }
 
     private bool _suppressSlider;
-    private void SliderRatio_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        if (_suppressSlider) return;
-        // XAML 加载期 Minimum 赋值会提前触发本事件，此时 RatioText 尚未创建
-        if (RatioText == null || SliderRatio == null) return;
-        RatioText.Text = SliderRatio.Value.ToString("0.0");
-        if (!IsLoaded) return;
-        _cfg.ChineseRatioLimit = SliderRatio.Value;
-        _cfg.Save();
-    }
-
     private void BtnClearCache_Click(object sender, RoutedEventArgs e)
     {
         _proxy?.ClearCache();
@@ -609,8 +528,6 @@ public partial class MainWindow : Window
             Interlocked.Exchange(ref _proxy.ModelCount, 0);
             Interlocked.Exchange(ref _proxy.ErrorCount, 0);
         }
-        _ruleHits.Clear();
-        foreach (var r in _ruleStats) r.Count = 0;
         _allRows.Clear();
         _view.Clear();
         UpdateStats();
@@ -718,8 +635,6 @@ public partial class MainWindow : Window
 
                 if (en.Kind == TrafficKind.Filtered)
                 {
-                    _ruleHits.TryGetValue(en.RuleId, out var c);
-                    _ruleHits[en.RuleId] = c + 1;
                 }
             }
 
@@ -794,15 +709,8 @@ public partial class MainWindow : Window
             StatSaved.Text = "—";
         }
 
-        StatCacheInfo.Text = $"缓存条目：{_proxy.CacheCount}（上限 {_cfg.CacheMaxEntries}）";
+        StatCacheInfo.Text = $"缓存条目：{_proxy.CacheCount}（热层 {_proxy.CacheHotCount}）";
 
-        var max = _ruleHits.Count == 0 ? 0 : _ruleHits.Values.Max();
-        foreach (var r in _ruleStats)
-        {
-            _ruleHits.TryGetValue(r.RuleId, out var c);
-            r.Count = c;
-            r.Refresh(max);
-        }
     }
 
     private void UpdateClock()
@@ -969,7 +877,7 @@ public partial class MainWindow : Window
         return System.Drawing.Icon.FromHandle(bmp.GetHicon());
     }
 
-    // ==================== DLL 轨道切换（ADR-007） ====================
+    // ==================== Direct DLL 部署（3.0 单轨） ====================
 
     private Core.DllSwitcher.SwitchStatus? _lastDllStatus;
 
@@ -992,21 +900,6 @@ public partial class MainWindow : Window
         {
             TxtDllStatus.Text = $"检测失败：{ex.Message}";
         }
-    }
-
-    private void BtnTrackGs_Click(object sender, RoutedEventArgs e)
-    {
-        if (MessageBox.Show(this, "GS 插件轨道仅作备用回退（一般用户无需切换）。确定切回 GS 轨道？",
-                "切换轨道", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
-            return;
-        var gameDir = TxtGameDir.Text.Trim();
-        _cfg.GameDir = gameDir;
-        _cfg.Save();
-        var assets = System.IO.Path.Combine(AppContext.BaseDirectory, "assets", "direct-dll");
-        var lines = Core.DllSwitcher.SwitchTo(gameDir, Core.DllSwitcher.TrackGs, assets,
-            listenPort: _cfg.ListenPort);
-        foreach (var line in lines) Log(line);
-        RefreshDllStatus();
     }
 
     private void BtnTrackDirect_Click(object sender, RoutedEventArgs e)
@@ -1051,7 +944,7 @@ public partial class MainWindow : Window
         {
             if (_lastDllStatus?.Current != Core.DllSwitcher.TrackDirect)
             {
-                TxtDirectDisplayHint.Text = "Track B 未启用；切到 Track B 或修改上方设置时会自动写入游戏目录配置。";
+                TxtDirectDisplayHint.Text = "Direct DLL 未部署；修改上方设置时会自动写入游戏目录配置。";
                 return;
             }
             var jsonPath = Path.Combine(TxtGameDir.Text.Trim(), "WoWTranslateDirect.json");

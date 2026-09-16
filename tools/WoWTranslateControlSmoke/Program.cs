@@ -17,7 +17,7 @@ namespace WoWTranslateControlSmoke;
 /// <summary>
 /// WoWTranslateControl 离屏 UI 冒烟：主窗口 / 术语表窗口 / 下载向导 三窗截图 + 控件断言。
 /// 断言点：
-///   1. 主窗口新增卡片（频道过滤 9 开关、翻译服务 ComboBox、插件一键配置、下载向导按钮）存在且可见；
+///   1. 主窗口卡片（频道过滤 9 开关、翻译服务 ComboBox、Direct DLL 部署、下载向导按钮）存在且可见；
 ///   2. 术语表窗口深色主题（Background=BgBrush）、按钮实际宽度足够容纳文字；
 ///   3. 向导窗口渲染出硬件摘要文本。
 /// </summary>
@@ -65,7 +65,7 @@ internal static class Program
             };
             w.Show();
             return w;
-        }, AssertMain, "主窗口：频道过滤/翻译服务/插件配置/向导入口");
+        }, AssertMain, "主窗口：频道过滤/翻译服务/Direct 部署/向导入口");
 
         Shot(app, outDir, "02_glossary", () =>
         {
@@ -110,8 +110,8 @@ internal static class Program
             "ChkChanEnabled", "ChkChanSay", "ChkChanYell", "ChkChanWhisper",
             "ChkChanParty", "ChkChanGuild", "ChkChanRaid", "ChkChanBg",
             "ChkChanWorld", "ChkChanUntagged");
-        Expect(w, errors, "TxtGameDir", "BtnConfigurePlugin", "BtnWizard", "TxtPluginReport");
-        // DLL 轨道切换卡（ADR-007）+ 托盘开关 + Track B 显示模式（v16 全自治驱动）
+        Expect(w, errors, "TxtGameDir", "BtnWizard");
+        // Direct DLL 部署卡（3.0 单轨）+ 托盘开关 + 显示模式
         Expect(w, errors, "BtnRefreshDll", "TxtDllStatus", "TxtGameDirStatus", "ChkTray",
             "CmbDirectDisplay", "TxtDirectPrefix", "CmbDirectOutgoing");
         var dispMode = FindByName<System.Windows.Controls.ComboBox>(w, "CmbDirectDisplay");
@@ -342,7 +342,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Failures.Add($"[{FAIL_TAG}] {desc}：异常 {ex.Message}");
+            Failures.Add($"[{FAIL_TAG}] {desc}：异常 {ex}");
             Console.WriteLine($"[{FAIL_TAG}] {desc}：异常 {ex}");
         }
         finally

@@ -14,10 +14,11 @@ public class DllSwitcherTests
         return dir;
     }
 
+    /// <summary>模拟已部署老 GS 插件的客户端根目录（3.0 部署后 GS DLL 应保留在磁盘上、插件自然失活）。</summary>
     private static string MakeFakeGame()
     {
         var game = TempDir();
-        // 2026-09-12 起 SwitchTo 有 Wow.exe 目录门禁，假客户端根目录必须带 Wow.exe
+        // Wow.exe 目录门禁：假客户端根目录必须带 Wow.exe
         File.WriteAllText(Path.Combine(game, "Wow.exe"), "fake-wow");
         File.WriteAllText(Path.Combine(game, "dinput8.dll"), "fake-dinput-gs");
         File.WriteAllText(Path.Combine(game, "WoWTranslate335.dll"), "fake-gs-dll");
@@ -34,15 +35,6 @@ public class DllSwitcherTests
     }
 
     [Fact]
-    public void ProbeDetectsGsTrack()
-    {
-        var game = MakeFakeGame();
-        var st = DllSwitcher.Probe(game, Path.Combine(game, "no-assets"));
-        Assert.Equal(DllSwitcher.TrackGs, st.Current);
-        Assert.False(st.DirectAssetsReady);
-    }
-
-    [Fact]
     public void ProbeDetectsDisabledWhenNoDinput()
     {
         var game = TempDir();
@@ -51,74 +43,67 @@ public class DllSwitcherTests
     }
 
     [Fact]
-    public void SwitchToDirectRequiresAssets()
+    public void DeployDirectRequiresAssets()
     {
         var game = MakeFakeGame();
-        var lines = DllSwitcher.SwitchTo(game, DllSwitcher.TrackDirect,
+        var lines = DllSwitcher.DeployDirect(game,
             Path.Combine(game, "no-assets"), wowRunning: () => false);
         Assert.Contains(lines, l => l.StartsWith("❌"));
-        // 游戏根目录不应被动过
+        // 游戏根目录不应被动过（含老 GS 插件文件）
         Assert.True(File.Exists(Path.Combine(game, "WoWTranslate335.dll")));
+        Assert.Equal("fake-dinput-gs", File.ReadAllText(Path.Combine(game, "dinput8.dll")));
     }
 
     [Fact]
-    public void SwitchToDirectAndBackPreservesGsBaseline()
+    public void DeployDirectOverwritesEntryAndLeavesGsDllInert()
     {
         var game = MakeFakeGame();
         var assets = MakeDirectAssets();
         var gsContent = File.ReadAllText(Path.Combine(game, "WoWTranslate335.dll"));
 
-        // 切到 direct
-        var lines = DllSwitcher.SwitchTo(game, DllSwitcher.TrackDirect, assets, wowRunning: () => false);
+        var lines = DllSwitcher.DeployDirect(game, assets, wowRunning: () => false);
         Assert.Contains(lines, l => l.StartsWith("✅"));
+        // dinput8 入口被 Direct 覆盖 → WoWTranslate335.dll 无人加载（文件保留但不属于轨道清单）
         Assert.Equal("fake-dinput-direct", File.ReadAllText(Path.Combine(game, "dinput8.dll")));
         Assert.True(File.Exists(Path.Combine(game, "WoWTranslateDirect.dll")));
-        Assert.False(File.Exists(Path.Combine(game, "WoWTranslate335.dll")));
         Assert.Equal("WoWTranslateDirect.dll", File.ReadAllText(Path.Combine(game, "dlls.txt")).Trim());
+        Assert.True(File.Exists(Path.Combine(game, "WoWTranslate335.dll")));
+        Assert.Equal(gsContent, File.ReadAllText(Path.Combine(game, "WoWTranslate335.dll")));
 
         var st = DllSwitcher.Probe(game, assets);
         Assert.Equal(DllSwitcher.TrackDirect, st.Current);
-
-        // GS 基线备份完好
-        var backup = Path.Combine(game, "wtc_backup", "gs", "WoWTranslate335.dll");
-        Assert.True(File.Exists(backup));
-        Assert.Equal(gsContent, File.ReadAllText(backup));
-
-        // 切回 gs
-        var back = DllSwitcher.SwitchTo(game, DllSwitcher.TrackGs, assets, wowRunning: () => false);
-        Assert.Contains(back, l => l.StartsWith("✅"));
-        Assert.Equal("fake-dinput-gs", File.ReadAllText(Path.Combine(game, "dinput8.dll")));
-        Assert.Equal(gsContent, File.ReadAllText(Path.Combine(game, "WoWTranslate335.dll")));
-        Assert.Equal("WoWTranslate335.dll", File.ReadAllText(Path.Combine(game, "dlls.txt")).Trim());
-        Assert.Equal(DllSwitcher.TrackGs, DllSwitcher.Probe(game, assets).Current);
     }
 
     [Fact]
-    public void SwitchToSameTrackIsNoOp()
-    {
-        var game = MakeFakeGame();
-        var lines = DllSwitcher.SwitchTo(game, DllSwitcher.TrackGs, TempDir(), wowRunning: () => false);
-        Assert.Contains(lines, l => l.Contains("已处于目标轨道"));
-        Assert.True(File.Exists(Path.Combine(game, "WoWTranslate335.dll")));
-    }
-
-    [Fact]
-    public void SwitchFromDisabledToGsRestoresBackup()
+    public void DeployDirectIsIdempotent()
     {
         var game = MakeFakeGame();
         var assets = MakeDirectAssets();
+        Assert.Contains(DllSwitcher.DeployDirect(game, assets, wowRunning: () => false), l => l.StartsWith("✅"));
+        // 重复部署 = 幂等重部署（不报错，结果一致）
+        Assert.Contains(DllSwitcher.DeployDirect(game, assets, wowRunning: () => false), l => l.StartsWith("✅"));
+        Assert.Equal("fake-dinput-direct", File.ReadAllText(Path.Combine(game, "dinput8.dll")));
+    }
 
-        // gs → direct → 手动删光（模拟 Direct DLL 损坏被用户清掉）
-        DllSwitcher.SwitchTo(game, DllSwitcher.TrackDirect, assets, wowRunning: () => false);
-        foreach (var f in new[] { "dinput8.dll", "WoWTranslateDirect.dll", "dlls.txt" })
-            File.Delete(Path.Combine(game, f));
-        Assert.Equal("disabled", DllSwitcher.Probe(game, assets).Current);
-
-        // disabled → gs：基线备份仍在，可恢复
-        var lines = DllSwitcher.SwitchTo(game, DllSwitcher.TrackGs, assets, wowRunning: () => false);
-        Assert.Contains(lines, l => l.StartsWith("✅"));
+    [Fact]
+    public void DeployDirectRefusesWhileWowRunning()
+    {
+        var game = MakeFakeGame();
+        var assets = MakeDirectAssets();
+        var lines = DllSwitcher.DeployDirect(game, assets, wowRunning: () => true);
+        Assert.Contains(lines, l => l.Contains("Wow.exe 正在运行"));
         Assert.Equal("fake-dinput-gs", File.ReadAllText(Path.Combine(game, "dinput8.dll")));
-        Assert.Equal(DllSwitcher.TrackGs, DllSwitcher.Probe(game, assets).Current);
+    }
+
+    [Fact]
+    public void DeployDirectWritesDirectConfig()
+    {
+        var game = MakeFakeGame();
+        var assets = MakeDirectAssets();
+        DllSwitcher.DeployDirect(game, assets, wowRunning: () => false, listenPort: 8123);
+        var cfg = Path.Combine(game, "WoWTranslateDirect.json");
+        Assert.True(File.Exists(cfg));
+        Assert.Contains("127.0.0.1:8123", File.ReadAllText(cfg));
     }
 }
 

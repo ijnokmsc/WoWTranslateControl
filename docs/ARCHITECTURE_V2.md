@@ -5,6 +5,15 @@
 
 ---
 
+> **⚠ 3.0 状态（2026-09-14）**：本文为 v2 双轨设计的历史定案。**3.0 已单轨化**——
+> Track A（GS 插件）支持整体移除（PluginConfigurator 删除、DllSwitcher 单轨化、
+> R1-R6 内容规则下线、按规则命中分布统计移除），只保留 Track B Direct DLL 自治引擎。
+> 禁用老插件的机制 = DLL 覆盖：Direct 的 dinput8.dll 占据同一加载入口后，
+> WoWTranslate335.dll 无人加载、自然失活；不删用户文件、不改 .toc。
+> 下方双轨章节保留作历史参考。
+
+---
+
 ## 1. 现状盘点（设计输入）
 
 ### 1.1 插件侧资产（GrimfallWoW 3.3.5a 客户端，已存在）

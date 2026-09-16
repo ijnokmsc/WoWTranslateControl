@@ -123,6 +123,9 @@ public sealed class ProxyServer : IDisposable
 
     public int CacheCount => _cacheStage.Count;
 
+    /// <summary>热层条目数（命中 ≥ HotThreshold，持久保留）。</summary>
+    public int CacheHotCount => _cacheStage.HotCount;
+
     private async Task AcceptLoopAsync(CancellationToken ct)
     {
         while (_running && !ct.IsCancellationRequested)

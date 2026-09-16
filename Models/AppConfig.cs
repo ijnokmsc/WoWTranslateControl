@@ -85,30 +85,10 @@ public sealed class AppConfig
     public string InTargetLang { get; set; } = "zh";
 
     // ---------- 过滤规则开关 ----------
-    /// <summary>R1 团队图标标记刷屏。日志占比 27.1%，重复放大 18.4 倍，单项最大元凶。</summary>
-    public bool RuleIconSpam { get; set; } = true;
 
-    /// <summary>R2 SPELL_* 战斗日志。日志占比 50.6%。</summary>
-    public bool RuleSpellLog { get; set; } = true;
 
-    /// <summary>R3 SWING_/RANGE_/ENVIRONMENTAL_ 等其他战斗事件。</summary>
-    public bool RuleCombatOther { get; set; } = true;
 
-    /// <summary>R4 拾取/分配/制造播报（获得了物品、赢得了、贪婪、制造了…）。日志占比 10.7%。</summary>
-    public bool RuleLoot { get; set; } = true;
 
-    /// <summary>R5 伤害/死亡/表情播报（点物理伤害、杀死了、挥了挥手…）。</summary>
-    public bool RuleDamageDeath { get; set; } = true;
-
-    /// <summary>
-    /// R6 中文兜底：剥掉魔兽标记后，中文字符数 >= 1 且英文字母数 &lt;= 中文数 * 倍率，
-    /// 判定为"本来就是中文、无需 EN→ZH 翻译"。
-    /// 这是启发式规则，可能误伤极短的中英混合消息，可在界面上单独关闭。
-    /// </summary>
-    public bool RuleChineseOnly { get; set; } = true;
-
-    /// <summary>R6 的英文/中文倍率阈值。越小越激进（过滤越多）。</summary>
-    public double ChineseRatioLimit { get; set; } = 2.0;
 
     /// <summary>
     /// R7 乱码兜底：最大连续段 4+ 个 '?' 判定为编码损坏文本（GS DLL 把中文逐字转成 ? 的产物），
@@ -119,7 +99,7 @@ public sealed class AppConfig
     /// <summary>
     /// R8 已含中文：剥离魔兽标记后中文字数 ≥ 阈值即拦截，不看英文比例。
     /// 针对 Questie/DBM 等插件播报——内容本就是中文（addon 名、GitHub/Discord 链接
-    /// 拉高英文字母数，R6 比例规则擦边漏过），模型只会把中文翻成另一种中文，纯浪费。
+    /// 拉高英文字母数擦边漏过），模型只会把中文翻成另一种中文，纯浪费。
     /// </summary>
     public bool RuleChinesePresent { get; set; } = true;
 
@@ -162,11 +142,11 @@ public sealed class AppConfig
     public string GoogleSl { get; set; } = "auto";
     public string GoogleTl { get; set; } = "zh-CN";
 
-    // ---------- 插件一键配置 ----------
+    // ---------- 游戏目录与部署 ----------
     /// <summary>游戏客户端根目录（含 Wow.exe / Interface / WTF）。</summary>
     public string GameDir { get; set; } = @"D:\Games\TriumvirateWoW";
 
-    /// <summary>频道说明目录（供界面展示与一键配置同步插件 incomingChannels）。</summary>
+    /// <summary>频道说明目录（供界面展示）。</summary>
     [JsonIgnore]
     public static readonly (string RuleId, string WowName, string CnName, string CfgKey)[] ChannelCatalog =
     {
@@ -194,10 +174,6 @@ public sealed class AppConfig
     /// <summary>最小化/关闭时缩到系统托盘（双击托盘还原，托盘菜单可真正退出）。</summary>
     public bool MinimizeToTray { get; set; } = true;
 
-    // ---------- 插件 DLL 轨道（ADR-007 双轨并行） ----------
-    /// <summary>当前偏好轨道："gs" = Track A 现役 GS 插件；"direct" = Track B 自有 Direct DLL（实验）。</summary>
-    public string PluginTrack { get; set; } = "gs";
-
     // ---------- Track B Direct DLL 显示（v16 全自治驱动） ----------
     /// <summary>
     /// Track B 驱动 Lua 的译文显示模式："replace" = 译文替换原文（失败/超时回显原文）；
@@ -217,26 +193,14 @@ public sealed class AppConfig
     /// </summary>
     public string DirectOutgoingMode { get; set; } = "replace";
 
-    // ---------- 过滤规则说明（只读，供界面展示） ----------
+    // ---------- 内部质检规则说明（只读；R1-R6 用户内容规则已随 GS 插件链路移除） ----------
     [JsonIgnore]
     public static readonly (string Key, string Name, string Detail)[] RuleCatalog =
     {
-        ("RuleIconSpam", "R1 图标刷屏",
-         "含 RaidTargetingIcon 或以 |Hicon: 开头。团队标记图标+玩家名，无自然语言。"),
-        ("RuleSpellLog", "R2 战斗日志",
-         "含 SPELL_AURA_APPLIED / SPELL_AURA_REMOVED / SPELL_PERIODIC_HEAL 等事件标识。"),
-        ("RuleCombatOther", "R3 其他战斗事件",
-         "含 SWING_ / RANGE_ / ENVIRONMENTAL_ 前缀的战斗事件标识。"),
-        ("RuleLoot", "R4 拾取播报",
-         "含 获得了物品 / 赢得了 / 放弃了 / 贪婪 / 需求 / 掷点 等中文固定词，及 automatically passes on / cannot loot that item / wins the roll 等英文固定句式。"),
-        ("RuleDamageDeath", "R5 伤害死亡播报",
-         "含 点物理伤害 / 吸收了 / 杀死了 / 死亡 / 挥了挥手 等中文播报。"),
-        ("RuleChineseOnly", "R6 中文兜底（启发式）",
-         "剥离魔兽标记后中文占主导，判定无需 EN→ZH 翻译。可单独关闭以防误伤。"),
         ("RuleMangled", "R7 乱码兜底",
          "最大连续段 4+ 个 '?' 判定为编码损坏文本（GS DLL 出入站把中文逐字转成 ? 的产物），翻译无意义，直接拦截。分散 3 连问号的真实聊天不误杀。"),
         ("RuleChinesePresent", "R8 已含中文（插件播报）",
-         "剥离标记后中文 ≥8 字即拦截，不看英文比例。针对 Questie/DBM 等中英混合插件播报（R6 比例规则漏过），避免中文→中文空转。"),
+         "剥离标记后中文 ≥8 字即拦截，不看英文比例。针对 Questie/DBM 等中英混合插件播报），避免中文→中文空转。"),
     };
 
     private static string ConfigPath =>

@@ -93,6 +93,84 @@ public class CacheStageTests
         var result = await cache.ProcessAsync(ctx, default);
         Assert.Null(result);
     }
+
+    // ---- 3.0 双层缓存 ----
+
+    private static async Task<TranslationContext> FillAndHitAsync(CacheStage cache, AppConfig cfg, string text, string tr)
+    {
+        var ctx = new TranslationContext(text, Array.Empty<byte>(), cfg);
+        await cache.ProcessAsync(ctx, default);
+        cache.Put(ctx, tr);
+        return ctx;
+    }
+
+    [Fact]
+    public async Task 命中达到阈值_晋升热层()
+    {
+        var glossary = NewGlossary();
+        var cache = new CacheStage(Cfg(), glossary, TempPath(), "llama-local");
+        await FillAndHitAsync(cache, Cfg(), "up grull", "升级了");
+
+        Assert.Equal(0, cache.HotCount);
+        // hits 1→2（Put+1，命中+1）；第二次查 + Put 到 3 → 晋升
+        for (var i = 0; i < 2; i++)
+        {
+            var ctx = new TranslationContext("up grull", Array.Empty<byte>(), Cfg());
+            var hit = await cache.ProcessAsync(ctx, default);
+            Assert.NotNull(hit);
+            cache.Put(ctx, "升级了");
+        }
+        Assert.Equal(1, cache.HotCount);
+    }
+
+    [Fact]
+    public async Task 长度淘汰_热层幸存()
+    {
+        var glossary = NewGlossary();
+        var cache = new CacheStage(Cfg(), glossary, TempPath(), "llama-local") { WarmCapacityChars = 50 };
+
+        // 先造一个热条目
+        await FillAndHitAsync(cache, Cfg(), "hot phrase", "热短语");
+        for (var i = 0; i < 2; i++)
+        {
+            var c = new TranslationContext("hot phrase", Array.Empty<byte>(), Cfg());
+            await cache.ProcessAsync(c, default);
+            cache.Put(c, "热短语");
+        }
+        Assert.Equal(1, cache.HotCount);
+
+        // 灌入超预算的温层条目，触发淘汰
+        for (var i = 0; i < 8; i++)
+            await FillAndHitAsync(cache, Cfg(), $"cold filler message number {i}", $"填充{i}");
+
+        Assert.Null(await cache.ProcessAsync(
+            new TranslationContext("cold filler message number 0", Array.Empty<byte>(), Cfg()), default));
+        // 热层不被淘汰
+        var hotHit = await cache.ProcessAsync(
+            new TranslationContext("hot phrase", Array.Empty<byte>(), Cfg()), default);
+        Assert.NotNull(hotHit);
+    }
+
+    [Fact]
+    public async Task 持久化_命中计数与真实LastUsed保留()
+    {
+        var path = TempPath();
+        var glossary = NewGlossary();
+        var cfg = Cfg();
+
+        var cache1 = new CacheStage(cfg, glossary, path, "llama-local");
+        await FillAndHitAsync(cache1, cfg, "repeat me", "重复我");
+        // 2 次额外命中（未 Put）→ hits=3 → 热层
+        for (var i = 0; i < 2; i++)
+            await cache1.ProcessAsync(new TranslationContext("repeat me", Array.Empty<byte>(), cfg), default);
+        cache1.SaveNow();
+        cache1.Dispose();
+
+        var cache2 = new CacheStage(cfg, glossary, path, "llama-local");
+        Assert.Equal(1, cache2.HotCount);   // 热层跨重启保留
+        var hit = await cache2.ProcessAsync(new TranslationContext("repeat me", Array.Empty<byte>(), cfg), default);
+        Assert.NotNull(hit);
+    }
 }
 
 public class OutgoingRoutingTests

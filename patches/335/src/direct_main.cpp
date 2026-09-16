@@ -123,7 +123,7 @@ static int PushResult(lua_State* L, const std::string& gbkOrAscii)
 // ---- Version: () → 版本串 ----
 WT_NOINLINE static int L_Version_impl(lua_State* L)
 {
-    return PushResult(L, "WoWTranslateDirect 2.1.3 (Track B) by ijnokmsc");
+    return PushResult(L, "WoWTranslateDirect 3.0.0 (Track B) by ijnokmsc");
 }
 WT_NOINLINE static int L_Version(lua_State* L)
 {
@@ -815,7 +815,7 @@ static DWORD WINAPI InitThread(LPVOID)
 {
     wt::wtSetSelfModule(g_hSelfModule);
     wt::LogInit();
-    WT_LOG_INFO("WoWTranslateDirect 2.1.3 init (Track B direct engine) by ijnokmsc");
+    WT_LOG_INFO("WoWTranslateDirect 3.0.0 init (Track B direct engine) by ijnokmsc");
     AutoConfigure();
 
     // ⚠ GS 原版时序复刻："Init thread started, sleeping 3s... → Attempting hook..."
