@@ -658,6 +658,7 @@ static volatile LONG g_driverBusy = 0;            // 重入保护（FrameScript_
 static volatile LONG g_driverAttempts = 0;        // 重试计数
 static volatile DWORD g_driverNextTick = 0;       // 下次允许尝试的 tick（500ms 节流）
 static volatile LONG g_gateLogCount = 0;          // 门禁探针日志条数（最多 3 条）
+static volatile LONG g_injectDepthSkips = 0;      // 注入等待浅栈的深度跳过计数（诊断）
 
 #define DRIVER_MAX_ATTEMPTS 600                   // 500ms 节流下约 5 分钟，足够等 FrameXML
 
@@ -701,12 +702,21 @@ static void TryInjectDriver(lua_State* L)
     InterlockedExchange(&g_driverNextTick, now + 500);
 
     int depth = ((fn_lua_gettop)g_pTrampoline)(L);
-    if (depth > 2)                                // 与注册同窗口（0..2）。FrameScript_Execute
-                                                  // 内部 pcall 建新调用帧，不触碰调用方栈；
-                                                  // ⚠ 世界状态里 depth==0 几乎等不到（v17 实测
-                                                  // 登录页能注入、进世界后永远等不到），故放宽
+    if (depth > 3)                                // FrameScript_Execute 内部 pcall 建新调用帧，
+                                                  // 不触碰调用方栈；v17 放宽到 ≤2，但 v40 实测
+                                                  // 世界态 /reload 后 gettop 深度普遍为 3（日志
+                                                  // depth=3/8），≤2 的窗口永远等不到 → 重载后
+                                                  // 驱动假死直到重启游戏；放宽到 ≤3（实测深度）
     {
         InterlockedExchange(&g_driverBusy, 0);
+        LONG sk = InterlockedIncrement(&g_injectDepthSkips);
+        if (!g_driverDone && sk % 200 == 1)
+        {
+            char sbuf[128];
+            _snprintf(sbuf, sizeof(sbuf),
+                      "inject: waiting shallow stack (depth>3 skipped %d times)", (int)sk);
+            WT_LOG_INFO(sbuf);
+        }
         return;
     }
 
@@ -803,6 +813,7 @@ static void OnGetTop(lua_State* L)
         InterlockedExchange(&g_driverDone, 0);
         InterlockedExchange(&g_driverAttempts, 0);
         InterlockedExchange(&g_gateLogCount, 0);   // 探针按状态重置：登录态 nil ≠ 世界态
+        InterlockedExchange(&g_injectDepthSkips, 0);
         RefreshDriverConfig();
     }
 
