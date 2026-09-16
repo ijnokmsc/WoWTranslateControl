@@ -74,6 +74,10 @@ local outPending, outCounter = {}, 0
 local origSend = SendChatMessage
 local dbg = { raw = 0, own = 0, ok = 0, terr = 0, to = 0, oto = 0, chatEvt = 0 }
 
+-- 断线熔断：网络类错误后冷却期内不捕获不压制，聊天原生显示（频道/ID 完整）
+local deadUntil = 0
+local BREAKER_COOLDOWN = 15
+
 -- UTF-8 文本的 CJK 检测（外发译文质检：翻译后的"英文"必须纯 ASCII 安全）
 local function HasCJKUtf8(t)
   for i = 1, string.len(t) - 2 do
@@ -164,6 +168,16 @@ local function DisplayLine(text, r, g, b)
   end
 end
 
+-- 翻译失败/超时兜底：回显原文并重建头部（频道标签+玩家链接），不再只显正文
+local function EchoOriginal(p)
+  local line = ""
+  if p.chanLabel ~= "" then line = p.chanLabel .. " " end
+  if p.sender ~= "" then
+    line = line .. "|Hplayer:" .. p.sender .. "|h[" .. p.sender .. "]|h： "
+  end
+  DisplayLine(line .. p.text, 1, 0.4, 0.4)
+end
+
 -- ---- 捕获去重查询：只查不标（标记由 TryCapture 负责）----
 -- v33 修复：SeenMark 先标后查会自吞事件帧自己的捕获（说/团队零捕获根因）
 local seen = {}
@@ -213,7 +227,7 @@ local function TryCapture(ch, msg, sender, chanLabel)
 end
 
 -- 频道显示标签：自定义频道用事件给出的频道名，标准频道用固定中文
-local CHAN_CN = { SAY = "[综合]", YELL = "[喊话]", WHISPER = "[密语]", PARTY = "[队伍]",
+local CHAN_CN = { SAY = "[综合]", YELL = "[喊话]", WHISPER = "[密语]", PARTY = "[小队]",
   GUILD = "[公会]", RAID = "[团队]", BATTLEGROUND = "[战场]" }
 local function ChanLabel(ch, ...)
   if ch == "CHANNEL" then
@@ -231,6 +245,7 @@ local TRANSLATE_MARK = "[译]"
 local function ShouldTranslate(event, msg, sender)
   local ch = EVENTS[event]
   if not ch or not msg or msg == "" then return nil end
+  if GetTime() < deadUntil then return nil end   -- 熔断冷却：放行原文
   local me = UnitName and UnitName("player")
   if me and me ~= "" and sender == me then return nil end
   if string.find(msg, TRANSLATE_MARK, 1, true) then return nil end   -- 已译标识防回环
@@ -245,28 +260,27 @@ local suppressCount = 0
 local function WTCSuppressFilter(chatFrame, event, msg, sender, ...)
   local ch = ShouldTranslate(event, msg, sender)
   if not ch then return false end
-  local r = TryCapture(ch, msg, sender, ChanLabel(ch, ...))
-  if r == "queued" then
-    -- 标记该条已被压制（译文回显时跳过判重的依据）
-    local snd = tostring(sender or "")
-    local newest, newestT
-    for _, p in pairs(pending) do
-      if p.sender == snd and not p.done and (newestT == nil or p.t > newestT) then
-)WTCDRIVER"
-R"WTCDRIVER(
-        newest, newestT = p, p.t
-      end
+  TryCapture(ch, msg, sender, ChanLabel(ch, ...))
+  -- 仅 replace 模式压制原文；both 模式放行（原文照显，译文由轮询追加）
+  if displayMode ~= "replace" then return false end
+  -- queued 与 dup 统一处理：dup = 事件帧先入队（派发顺序竞争），条目已在
+  -- pending 里——匹配同发送者最新未完成条目标记压制。只处理 queued 会让
+  -- dup 时过滤器放行 → 原文漏网 + 译文追加 = 双行显示（小队/团队漏替根因）。
+  local snd = tostring(sender or "")
+  local newest, newestT
+  for _, p in pairs(pending) do
+    if p.sender == snd and not p.done and (newestT == nil or p.t > newestT) then
+      newest, newestT = p, p.t
     end
-    if newest then newest.suppressed = true end
-    suppressCount = suppressCount + 1
-    if suppressCount <= 3 then
-      WoWTranslate_Diag("WTC_FILTERCAP #" .. suppressCount .. " ch=" .. ch ..
-        " sender=" .. tostring(sender) .. " mode=" .. displayMode)
-    end
-    -- 仅 replace 模式压制原文；both 模式放行（原文照显，译文由轮询追加）
-    return displayMode == "replace"
   end
-  return false
+  if not newest then return false end   -- 无条目（风暴丢弃）→ 放行原文
+  newest.suppressed = true
+  suppressCount = suppressCount + 1
+  if suppressCount <= 3 then
+    WoWTranslate_Diag("WTC_FILTERCAP #" .. suppressCount .. " ch=" .. ch ..
+      " sender=" .. tostring(sender) .. " mode=" .. displayMode)
+  end
+  return true
 end
 
 for ev in pairs(EVENTS) do
@@ -321,6 +335,9 @@ for i = 1, 3 do
 end
 
 -- ---- 轮询帧：Poll 译文 + 显示 + 超时兜底 ----
+-- （MSVC 单个原始字符串字面量上限：此处拆分为两个相邻字面量拼接）
+)WTCDRIVER"
+R"WTCDRIVER(
 local pollAcc = 0
 local pollFrame = CreateFrame("Frame")
 pollFrame:SetScript("OnUpdate", function(self, elapsed)
@@ -363,24 +380,28 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
         if dbg.terr <= 3 then
           WoWTranslate_Diag("WTC_TRANSERR id=" .. id .. " err=" .. string.sub(er, 1, 80))
         end
-        -- 失败回显原文（不加诊断前缀，保持聊天观感）
-        DisplayLine(p.text, 1, 0.4, 0.4)
+        -- 网络类错误（控制台未启动/端口拒绝）→ 打开熔断，冷却期内放行原文
+        if string.find(er, "network", 1, true) and GetTime() >= deadUntil then
+          deadUntil = GetTime() + BREAKER_COOLDOWN
+          WoWTranslate_Diag("WTC_BREAKER open (cooldown " .. BREAKER_COOLDOWN .. "s)")
+        end
+        -- 失败回显原文（重建头部，保持聊天观感）
+        EchoOriginal(p)
       else
         dbg.ok = dbg.ok + 1
         if dbg.ok <= 3 then
           WoWTranslate_Diag("WTC_TRANSOK id=" .. id)
         end
-        -- 中文回显去重：译文与归一化原文一致且原文未被压制（UI 已显示）
-        -- → 不重复显示（压制过的仍要显示，否则消息丢失）
+        -- 译文显示行：标识统一紧贴正文前方（[chanLabel] [sender]： [译] 译文）
         if tr ~= "" and (tr == otxt or tr == p.text) and not p.suppressed then
           -- skip
         else
-          local line = TRANSLATE_MARK
-          if p.chanLabel ~= "" then line = p.chanLabel .. " " .. line end
+          local line = ""
+          if p.chanLabel ~= "" then line = p.chanLabel .. " " end
           if p.sender ~= "" then
-            line = line .. " |Hplayer:" .. p.sender .. "|h[" .. p.sender .. "]|h： "
+            line = line .. "|Hplayer:" .. p.sender .. "|h[" .. p.sender .. "]|h： "
           end
-          line = line .. tr
+          line = line .. dispPrefix .. " " .. tr
           if displayMode == "both" then
             DisplayLine(dispPrefix .. line, p.r, p.g, p.b)
           else
@@ -401,7 +422,7 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
       if dbg.to <= 3 then
         WoWTranslate_Diag("WTC_TIMEOUT id=" .. mid)
       end
-      DisplayLine(p.text, 1, 0.4, 0.4)
+      EchoOriginal(p)
     end
   end
   -- 外发超时：replace 模式发原文兜底（both 已发过原文）
@@ -461,7 +482,7 @@ bannerFrame:SetScript("OnEvent", function()
     if acc < 1 then return end
     self:SetScript("OnUpdate", nil)
     if DEFAULT_CHAT_FRAME then
-      DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 2.1.2 by ijnokmsc (driver v31, mode=" ..
+      DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 2.1.3 by ijnokmsc (driver v35, mode=" ..
         displayMode .. ", outgoing=" .. outgoingMode .. ")")
     end
   end)
