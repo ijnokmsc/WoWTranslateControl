@@ -736,7 +736,7 @@ static void TryInjectDriver(lua_State* L)
     // v39：读取门禁探针全局（纯 Lua 写入的 WTC_GATE_INFO，见 driver_lua.h）。
     // 用注册同款的 getfield 裸读（Grimfall 实测安全），绝不调注册进 _G 的 API——
     // 该客户端校验嵌套 FrameScript_Execute 期间的 C 函数调用（v38 崩溃根因）。
-    if (g_gateLogCount < 3 && p_rawget && p_pushstring && p_tolstring && p_settop)
+    if (g_gateLogCount < 6 && p_rawget && p_pushstring && p_tolstring && p_settop)
     {
         // ⚠ 不能用 getfield：v13 定案本客户端 getfield 走 gt 伪索引读回恒 nil
         // （TryRegisterCore 注释："getfield 读回 print 也得 0"）。改用注册同款
@@ -799,6 +799,7 @@ static void OnGetTop(lua_State* L)
         // /reload → 新 Lua 状态（旧驱动的 hook/帧随旧状态销毁）→ 重读配置 + 重注驱动
         InterlockedExchange(&g_driverDone, 0);
         InterlockedExchange(&g_driverAttempts, 0);
+        InterlockedExchange(&g_gateLogCount, 0);   // 探针按状态重置：登录态 nil ≠ 世界态
         RefreshDriverConfig();
     }
 
