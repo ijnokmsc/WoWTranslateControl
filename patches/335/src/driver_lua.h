@@ -242,6 +242,8 @@ end
 -- 中文判定（编码无关）：任一字节 >= 0x81 即含 CJK（GBK 双字节首位/UTF-8 首字节均为高位）
 -- ——事件参数是纯正文（无头污染），该判定不再误伤"中文 ID 玩家的英文消息"
 local TRANSLATE_MARK = "[译]"
+-- 外发英文标识：对方软件客户端收到 [TR] 行不应再翻（防双软件二次翻译）
+local OUTGOING_MARK = "[TR]"
 local function ShouldTranslate(event, msg, sender)
   local ch = EVENTS[event]
   if not ch or not msg or msg == "" then return nil end
@@ -249,6 +251,7 @@ local function ShouldTranslate(event, msg, sender)
   local me = UnitName and UnitName("player")
   if me and me ~= "" and sender == me then return nil end
   if string.find(msg, TRANSLATE_MARK, 1, true) then return nil end   -- 已译标识防回环
+  if string.find(msg, OUTGOING_MARK, 1, true) then return nil end    -- 外发译文标识：已是英文译文
   if HasCJK(msg) then return nil end   -- 中文消息不送翻（双方都装软件时的重复根源）
   return ch
 end
@@ -482,7 +485,7 @@ bannerFrame:SetScript("OnEvent", function()
     if acc < 1 then return end
     self:SetScript("OnUpdate", nil)
     if DEFAULT_CHAT_FRAME then
-      DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.0.0 by ijnokmsc (driver v36, mode=" ..
+      DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.0.0 by ijnokmsc (driver v37, mode=" ..
         displayMode .. ", outgoing=" .. outgoingMode .. ")")
     end
   end)
