@@ -736,19 +736,30 @@ static void TryInjectDriver(lua_State* L)
     // v39：读取门禁探针全局（纯 Lua 写入的 WTC_GATE_INFO，见 driver_lua.h）。
     // 用注册同款的 getfield 裸读（Grimfall 实测安全），绝不调注册进 _G 的 API——
     // 该客户端校验嵌套 FrameScript_Execute 期间的 C 函数调用（v38 崩溃根因）。
-    if (g_gateLogCount < 3 && p_getfield && p_tolstring && p_settop)
+    if (g_gateLogCount < 3 && p_rawget && p_pushstring && p_tolstring && p_settop)
     {
-        p_getfield(L, LUA_GLOBALSINDEX_L48, "WTC_GATE_INFO");
-        const char* gate = p_tolstring(L, -1, NULL);
-        if (gate && *gate)
+        // ⚠ 不能用 getfield：v13 定案本客户端 getfield 走 gt 伪索引读回恒 nil
+        // （TryRegisterCore 注释："getfield 读回 print 也得 0"）。改用注册同款
+        // 直读路径：压 gt TValue 副本（L+0x48）→ pushstring(key) → rawget(-2)。
+        BYTE* Lb = (BYTE*)L;
+        DWORD top = *(DWORD*)(Lb + 0xC);
+        if (top)
         {
-            ++g_gateLogCount;
-            char gbuf[256];
-            _snprintf(gbuf, sizeof(gbuf), "diag: WTC_GATE miss#%d %s",
-                      (int)g_gateLogCount, gate);
-            WT_LOG_INFO(gbuf);
+            memcpy((void*)top, Lb + 0x48, 16);           // 压 gt TValue 副本（含 shadow）
+            *(DWORD*)(Lb + 0xC) = top + 16;
+            p_pushstring(L, "WTC_GATE_INFO");
+            p_rawget(L, -2);                             // 弹 key，压 t[key]
+            const char* gate = p_tolstring(L, -1, NULL);
+            if (gate && *gate)
+            {
+                ++g_gateLogCount;
+                char gbuf[256];
+                _snprintf(gbuf, sizeof(gbuf), "diag: WTC_GATE miss#%d %s",
+                          (int)g_gateLogCount, gate);
+                WT_LOG_INFO(gbuf);
+            }
+            p_settop(L, -3);                             // 弹 value + gt 副本
         }
-        p_settop(L, -2);   // 弹回探针值，恢复调用方栈
     }
     InterlockedExchange(&g_driverBusy, 0);
     LONG n = InterlockedIncrement(&g_driverAttempts);
