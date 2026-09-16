@@ -44,43 +44,11 @@ struct ClientProfile
                                //   内（ERROR #134 Invalid function pointer，IDA 0x86B5A0 实锤），
                                //   外部 DLL 的函数指针直接 fatal；跳板让闭包持有一个
                                //   白名单内的地址，实际执行 jmp 回本 DLL。
-    LuaAddr       addrs[14];
+    const LuaAddr* addrs;
 };
 
-static const ClientProfile kProfiles[] = {
-    {
-        "grimfall-335a",        // GrimfallWoW：与通用 3.3.5a 签名相同，但带函数指针白名单
-        0x400000,
-        0xD3F78C,
-        0xAC804C,
-        "19B74B09224B875B1D848D2E44FFB511",   // exe 前 64KB MD5（v39 日志实测）
-        true,                                 // 需要 .text 代码洞跳板
-        {
-            { 0x84DBD0, "lua_gettop",       "UìMA+A", 12 },
-            { 0x84DBF0, "lua_settop",       "Uì", 3 },
-            { 0x84E350, "lua_pushstring",   "Uì", 3 },
-            { 0x84E400, "lua_pushcclosure", "Uì", 3 },
-            { 0x84E600, "lua_rawget",       "UìEVuÎè¯óÿÿ", 17 },
-            { 0x84E670, "lua_getfield",     "UìEVuÎè?óÿÿ", 17 },
-            { 0x84E8D0, "lua_settable",     "UìEVuÎèßðÿÿ", 17 },
-            { 0x84E0E0, "lua_tolstring",    "Uì", 3 },
-            { 0x84DF60, "lua_isstring",     "Uì", 3 },
-            { 0x84DF20, "lua_isnumber",     "Uì", 3 },
-            { 0x84E030, "lua_tonumber",     "Uì", 3 },
-            { 0x84E280, "lua_pushnil",      "Uì", 3 },
-            { 0x84EC50, "lua_pcall",        "Uì", 3 },
-            { 0x819210, "FrameScript_Execute", "Uì", 3 },
-        },
-    },
-    {
-        "wotlk-335a",           // 3.3.5a 基座通用画像（TriumvirateWoW 实测；指纹不匹配
-                                // Grimfall 时落到这里）
-        0x400000,
-        0xD3F78C,               // dword_D3F78C：FrameScript_Execute 内部使用的全局 L
-        0xAC804C,               // 客户端静态错误处理器（sub_510B30 同款传参）
-        nullptr,                // 不限定指纹
-        false,                  // 无白名单守卫，不需要跳板
-        {
+// 3.3.5a 基座地址表（grimfall/wotlk 画像共用；签名字节两客户端实测一致）
+static const LuaAddr kAddrs335[14] = {
             { 0x84DBD0, "lua_gettop",       "\x55\x8B\xEC\x8B\x4D\x08\x8B\x41\x0C\x2B\x41\x10", 12 },
             { 0x84DBF0, "lua_settop",       "\x55\x8B\xEC", 3 },
             { 0x84E350, "lua_pushstring",   "\x55\x8B\xEC", 3 },
@@ -99,7 +67,27 @@ static const ClientProfile kProfiles[] = {
             // FrameScript_Execute（/run 实现，IDA dump 0x819210）：__cdecl (code, len, errHandler)
             // 内部自带全局 L（profile.globalLPtr）、registry 错误处理器保存恢复、栈平衡。
             { 0x819210, "FrameScript_Execute", "\x55\x8B\xEC", 3 },
-        },
+};
+
+static const ClientProfile kProfiles[] = {
+    {
+        "grimfall-335a",        // GrimfallWoW：与通用 3.3.5a 签名相同，但带函数指针白名单
+        0x400000,
+        0xD3F78C,
+        0xAC804C,
+        "19B74B09224B875B1D848D2E44FFB511",   // exe 前 64KB MD5（v39 日志实测）
+        true,                                 // 需要 .text 代码洞跳板
+        kAddrs335,
+    },
+    {
+        "wotlk-335a",           // 3.3.5a 基座通用画像（TriumvirateWoW 实测；指纹不匹配
+                                // Grimfall 时落到这里）
+        0x400000,
+        0xD3F78C,               // dword_D3F78C：FrameScript_Execute 内部使用的全局 L
+        0xAC804C,               // 客户端静态错误处理器（sub_510B30 同款传参）
+        nullptr,                // 不限定指纹
+        false,                  // 无白名单守卫，不需要跳板
+        kAddrs335,
     },
 };
 
@@ -388,7 +376,7 @@ static bool BuildCaveStubs()
         {
             DWORD va = *(const DWORD*)(s + 12);
             tStart = base + va;
-            tEnd = tStart + *(const DWORD*)(s + 20);   // + SizeOfRawData（与守卫同款）
+            tEnd = tStart + *(const DWORD*)(s + 16);   // + SizeOfRawData（节头偏移 16；s+20 是 PointerToRawData，v40 首版写错导致只扫了 1KB）
             break;
         }
     }
