@@ -140,6 +140,7 @@ public partial class MainWindow : Window
     }
 
     private bool _forceExit;
+    private int _memSampleTick;
 
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
@@ -721,11 +722,27 @@ public partial class MainWindow : Window
         if (_llama == null) return;
         UptimeText.Text = _llama.Uptime.ToString(@"hh\:mm\:ss");
 
-        // llama 内存占用监控（每秒采样；长跑内存增长可见化）
+        // llama 内存占用监控（每秒采样显示；每分钟落一行 CSV 供趋势分析）
         var mem = _llama.WorkingSetMB;
         LlamaPidText.Text = _llama.Pid is int p && _llama.State is LlamaState.Running or LlamaState.Starting
             ? (mem.HasValue ? $"PID {p} · {mem.Value:N0} MB" : $"PID {p}")
             : "";
+        if (++_memSampleTick >= 60)
+        {
+            _memSampleTick = 0;
+            if (mem.HasValue && _llama.Pid is int mp)
+            {
+                try
+                {
+                    var csv = Path.Combine(AppContext.BaseDirectory, "llama_mem.csv");
+                    if (!File.Exists(csv))
+                        File.AppendAllText(csv, "time,pid,working_set_mb" + Environment.NewLine);
+                    File.AppendAllText(csv,
+                        $"{DateTime.Now:yyyy-MM-dd HH:mm:ss},{mp},{mem.Value:F1}" + Environment.NewLine);
+                }
+                catch { /* 日志写失败不影响服务 */ }
+            }
+        }
 
         // 进程可能已自行退出，这里做一次轻量校正
         if (_llama.State == LlamaState.Running || _llama.State == LlamaState.Starting)
