@@ -89,6 +89,9 @@ public partial class MainWindow : Window
         // 初始定位到左栏顶部（初始化期间控件变更可能触发 BringIntoView 滚动）
         LeftScroll.ScrollToTop();
 
+        var orphans = LlamaServerManager.KillOrphans();
+        if (orphans > 0)
+            Log($"已清理上次会话残留的 llama-server 孤儿进程 × {orphans}");
         _llama = new LlamaServerManager(_cfg);
         _llama.OnStateChanged += OnLlamaStateChanged;
         _llama.OnLog += Log;
@@ -717,6 +720,12 @@ public partial class MainWindow : Window
     {
         if (_llama == null) return;
         UptimeText.Text = _llama.Uptime.ToString(@"hh\:mm\:ss");
+
+        // llama 内存占用监控（每秒采样；长跑内存增长可见化）
+        var mem = _llama.WorkingSetMB;
+        LlamaPidText.Text = _llama.Pid is int p && _llama.State is LlamaState.Running or LlamaState.Starting
+            ? (mem.HasValue ? $"PID {p} · {mem.Value:N0} MB" : $"PID {p}")
+            : "";
 
         // 进程可能已自行退出，这里做一次轻量校正
         if (_llama.State == LlamaState.Running || _llama.State == LlamaState.Starting)

@@ -35,6 +35,46 @@ public sealed class LlamaServerManager : IDisposable
         ? DateTime.Now - _startedAt
         : TimeSpan.Zero;
 
+    /// <summary>llama-server 工作集内存（MB）。未运行返回 null；调用方按秒采样即可。</summary>
+    public double? WorkingSetMB
+    {
+        get
+        {
+            if (_proc is not { HasExited: false }) return null;
+            try
+            {
+                _proc.Refresh();
+                return _proc.WorkingSet64 / 1024.0 / 1024.0;
+            }
+            catch { return null; }
+        }
+    }
+
+    /// <summary>
+    /// 清理上次会话残留的 llama-server 孤儿进程（控制台被强杀/崩溃时子进程存活）。
+    /// 在主窗口构造（Mutex 已获持有）后调用——单实例保证此刻存在的 llama-server
+    /// 均为孤儿。返回清理的进程数。
+    /// </summary>
+    public static int KillOrphans()
+    {
+        int killed = 0;
+        try
+        {
+            foreach (var p in Process.GetProcessesByName("llama-server"))
+            {
+                try
+                {
+                    p.Kill(entireProcessTree: true);
+                    killed++;
+                }
+                catch { /* 已退出/权限不足：跳过 */ }
+                finally { p.Dispose(); }
+            }
+        }
+        catch { /* 枚举失败不影响启动 */ }
+        return killed;
+    }
+
     public event Action<LlamaState>? OnStateChanged;
     public event Action<string>? OnOutput;
     public event Action<string>? OnLog;
