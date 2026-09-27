@@ -96,7 +96,7 @@ public sealed class DllSwitcher
     /// </summary>
     public static string WriteDirectConfig(string gameDir, int listenPort,
         string displayMode, string displayPrefix, string outgoingMode = "off",
-        bool dllLog = false)
+        bool dllLog = false, string outFilter = "", string outOff = "")
     {
         if (displayMode != "replace" && displayMode != "both") displayMode = "replace";
         if (outgoingMode != "off" && outgoingMode != "replace" && outgoingMode != "both")
@@ -110,6 +110,8 @@ public sealed class DllSwitcher
             $"  \"displayMode\": \"{displayMode}\",\n" +
             $"  \"displayPrefix\": \"{EscapeJson(displayPrefix ?? "[译]")}\",\n" +
             $"  \"outgoingMode\": \"{outgoingMode}\",\n" +
+            $"  \"outFilter\": \"{EscapeJson(outFilter ?? "")}\",\n" +
+            $"  \"outOff\": \"{EscapeJson(outOff ?? "")}\",\n" +
             $"  \"log\": {(dllLog ? "true" : "false")}\n" +
             "}\n";
         var path = Path.Combine(gameDir, "WoWTranslateDirect.json");
@@ -156,7 +158,9 @@ public sealed class DllSwitcher
         string displayMode = "replace",
         string displayPrefix = "[译]",
         string outgoingMode = "off",
-        bool dllLog = false)
+        bool dllLog = false,
+        string outFilter = "",
+        string outOff = "")
     {
         var lines = new List<string>();
         try
@@ -216,7 +220,8 @@ public sealed class DllSwitcher
                 File.Copy(Path.Combine(srcDir, f), Path.Combine(gameDir, f));
             File.WriteAllText(Path.Combine(gameDir, "dlls.txt"),
                 "WoWTranslateDirect.dll" + Environment.NewLine);
-            var cfgPath = WriteDirectConfig(gameDir, listenPort, displayMode, displayPrefix, outgoingMode, dllLog);
+            var cfgPath = WriteDirectConfig(gameDir, listenPort, displayMode, displayPrefix,
+                outgoingMode, dllLog, outFilter, outOff);
             lines.Add($"✔ 已部署 Direct DLL（资产来自 {srcDir}）");
             lines.Add($"✔ 已写入 {Path.GetFileName(cfgPath)}（endpoint 127.0.0.1:{listenPort}，displayMode={displayMode}，outgoing={outgoingMode}）");
 
@@ -245,7 +250,8 @@ public sealed class DllSwitcher
     /// </summary>
     public static List<string> EnsureDeployed(string gameDir, string directAssetsDir,
         string displayMode, string displayPrefix, string outgoingMode,
-        int listenPort = 8080, Func<bool>? wowRunning = null, bool dllLog = false)
+        int listenPort = 8080, Func<bool>? wowRunning = null, bool dllLog = false,
+        string outFilter = "", string outOff = "")
     {
         var status = Probe(gameDir, directAssetsDir);
         if (status.Current == TrackDirect)
@@ -264,7 +270,7 @@ public sealed class DllSwitcher
         }
         lines.Add("ℹ 未检测到 Direct DLL，正在自动部署…");
         lines.AddRange(DeployDirect(gameDir, directAssetsDir, wowRunning,
-            listenPort, displayMode, displayPrefix, outgoingMode, dllLog));
+            listenPort, displayMode, displayPrefix, outgoingMode, dllLog, outFilter, outOff));
         return lines;
     }
 
@@ -329,5 +335,116 @@ public sealed class DllSwitcher
         using var fa = File.OpenRead(a);
         using var fb = File.OpenRead(b);
         return Convert.ToHexString(md5.ComputeHash(fa)) == Convert.ToHexString(md5.ComputeHash(fb));
+    }
+
+    // ==================== 卸载（v41 智能卸载） ====================
+
+    /// <summary>备份文件是否含 WTC 标识字符串（"WoWTranslateDirect"）——有即 WTC 自己的产物，不还原。</summary>
+    private static bool ContainsWtcMark(string file)
+    {
+        const string mark = "WoWTranslateDirect";
+        try
+        {
+            using var fs = File.OpenRead(file);
+            var buf = new byte[64 * 1024];
+            var tail = Array.Empty<byte>();
+            int n;
+            while ((n = fs.Read(buf, 0, buf.Length)) > 0)
+            {
+                // 跨块边界保留 mark.Length-1 字节，避免标识恰好骑在分界处漏检
+                var chunk = new byte[tail.Length + n];
+                tail.CopyTo(chunk, 0);
+                Array.Copy(buf, 0, chunk, tail.Length, n);
+                if (System.Text.Encoding.Latin1.GetString(chunk).Contains(mark)) return true;
+                tail = chunk[^Math.Min(mark.Length - 1, chunk.Length)..];
+            }
+        }
+        catch { return true; }   // 读不了按 WTC 处理（不还原，保守）
+        return false;
+    }
+
+    /// <summary>
+    /// 智能卸载：删除本轨道文件与 WoWTranslateDirect.json；wtc_backup/direct 中
+    /// 归属不是 WTC 的备份文件还原回游戏根目录（部署前用户原有的文件，如其他模组
+    /// 的 dinput8.dll）。归属判定：MD5 等于当前 WTC 资产、或文件内含 WTC 标识
+    /// 字符串（覆盖 EnsureUpToDate 备份过的旧版 WTC DLL）→ 是 WTC 的，不还原；
+    /// dlls.txt 按 WTC 固定写入内容特判。备份目录保留。Wow.exe 运行时拒绝。
+    /// </summary>
+    public static List<string> UninstallDirect(string gameDir, string directAssetsDir,
+        Func<bool>? wowRunning = null)
+    {
+        var lines = new List<string>();
+        try
+        {
+            if (wowRunning?.Invoke() ?? WowRunningProbe())
+            {
+                lines.Add("❌ 检测到 Wow.exe 正在运行。卸载需要游戏完全退出（文件被占用）。");
+                return lines;
+            }
+            if (!Directory.Exists(gameDir))
+            {
+                lines.Add($"❌ 游戏目录不存在：{gameDir}");
+                return lines;
+            }
+
+            var status = Probe(gameDir, directAssetsDir);
+            lines.Add($"当前状态：{status.CurrentText}");
+            if (status.Current != TrackDirect)
+            {
+                lines.Add("ℹ 未检测到已部署的 Direct DLL，无需卸载。");
+                return lines;
+            }
+
+            // ---- 1. 删除本轨道文件 + 配置 ----
+            foreach (var f in TrackFiles)
+            {
+                var p = Path.Combine(gameDir, f);
+                if (File.Exists(p)) { File.Delete(p); lines.Add($"  已删除 {f}"); }
+            }
+            var cfg = Path.Combine(gameDir, "WoWTranslateDirect.json");
+            if (File.Exists(cfg)) { File.Delete(cfg); lines.Add("  已删除 WoWTranslateDirect.json"); }
+
+            // ---- 2. 备份还原：只还原归属不是 WTC 的文件 ----
+            var bakDir = BackupDir(gameDir);
+            if (Directory.Exists(bakDir))
+            {
+                foreach (var bakFile in Directory.GetFiles(bakDir))
+                {
+                    var name = Path.GetFileName(bakFile);
+                    var dst = Path.Combine(gameDir, name);
+                    string? restoreReason = null;
+                    if (name == "dlls.txt")
+                    {
+                        if (File.ReadAllText(bakFile).Trim() != "WoWTranslateDirect.dll")
+                            restoreReason = "内容非 WTC 写入格式";
+                    }
+                    else if (File.Exists(dst))
+                    {
+                        lines.Add($"  跳过 {name}（游戏根目录已存在同名文件，不覆盖）");
+                    }
+                    else
+                    {
+                        var asset = Path.Combine(directAssetsDir, name);
+                        var isWtcOwn = (File.Exists(asset) && SameHash(bakFile, asset)) ||
+                                       ContainsWtcMark(bakFile);
+                        if (!isWtcOwn) restoreReason = "用户原有文件";
+                    }
+                    if (restoreReason != null)
+                    {
+                        File.Copy(bakFile, dst, overwrite: false);
+                        lines.Add($"  已还原 {name} ← wtc_backup/direct（{restoreReason}）");
+                    }
+                }
+                lines.Add("ℹ 备份目录 wtc_backup/direct 保留未动。");
+            }
+
+            lines.Add("✅ 卸载完成。下次启动游戏不再加载翻译引擎；点「重新部署 Direct DLL」可随时恢复。");
+            return lines;
+        }
+        catch (Exception ex)
+        {
+            lines.Add($"❌ 卸载失败：{ex.Message}");
+            return lines;
+        }
     }
 }

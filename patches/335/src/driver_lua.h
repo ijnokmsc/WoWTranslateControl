@@ -62,6 +62,16 @@ if not (not WTC_DRIVER_LOADED and NUM_CHAT_WINDOWS and DEFAULT_CHAT_FRAME and Ch
     " dcf=" .. tostring(DEFAULT_CHAT_FRAME ~= nil) ..
     " cfoe=" .. tostring(ChatFrame_OnEvent ~= nil) ..
     " cf1=" .. tostring(ChatFrame1 ~= nil)
+elseif WoWTranslate_Diag == nil or WoWTranslate_Translate == nil or WoWTranslate_Poll == nil then
+  -- v42 API 注册校验：登录期 Lua 状态多次切换，注册 C 函数的状态与脚本执行
+  -- （FrameScript_Execute 内部走 *globalLPtr）的状态可能错位，驱动会"活着但
+  -- API 为 nil"——过滤器照常注册并吞消息、每条聊天抛 attempt to call global
+  -- 'WoWTranslate_Diag' (a nil value)（Frostmourne 实测）。
+  -- 此处不置 WTC_DRIVER_LOADED、不注册过滤器；引擎读到未加载 → 重试，
+  -- 当前全局状态的 gettop 走切换分支重注册后干净重注入。
+  WTC_GATE_INFO = "api-missing diag=" .. tostring(WoWTranslate_Diag ~= nil) ..
+    " tr=" .. tostring(WoWTranslate_Translate ~= nil) ..
+    " poll=" .. tostring(WoWTranslate_Poll ~= nil)
 else
 WTC_DRIVER_LOADED = true
 
@@ -458,9 +468,41 @@ local OUT_TYPES = {
   OFFICER = true, RAID = true, RAID_WARNING = true, BATTLEGROUND = true,
   CHANNEL = true,
 }
+-- v41 发送消息过滤器：外发频道开关（outoff="WHISPER,CHANNEL"）——关闭的频道原样放行
+local OUT_OFF = {}
+for offch in string.gmatch(tostring(WTC_CFG.outoff or ""), "[^,%s]+") do
+  OUT_OFF[offch] = true
+end
+-- v41 免翻译前缀规则（outfilter 多行，每行一条）：消息以任一规则开头 → 原样放行。
+-- 另内置恒生效：首字符为半角句点或全角句号（. / 。，U+3002 = UTF-8 E3 80 82）
+-- ——私服命令即便后跟中文也不送翻，防止命令被翻译损坏。
+local OUT_RULES = {}
+for rule in string.gmatch(tostring(WTC_CFG.outfilter or ""), "[^\r\n]+") do
+  rule = string.match(rule, "^%s*(.-)%s*$")
+  if rule ~= "" then table.insert(OUT_RULES, rule) end
+end
+local function ShouldSkipOutgoing(msg)
+  local b1, b2, b3 = string.byte(msg, 1, 3)
+  if b1 == 0x2E or (b1 == 0xE3 and b2 == 0x80 and b3 == 0x82) then
+    return "dot"
+  end
+  for _, rule in ipairs(OUT_RULES) do
+    if string.sub(msg, 1, string.len(rule)) == rule then return "rule" end
+  end
+  return nil
+end
 SendChatMessage = function(msg, chatType, language, channel)
   if outgoingMode == "off" or not msg or msg == "" or not HasCJK(msg)
     or not chatType or not OUT_TYPES[chatType] then
+    return origSend(msg, chatType, language, channel)
+  end
+  if OUT_OFF[chatType] then
+    return origSend(msg, chatType, language, channel)
+  end
+  local skipWhy = ShouldSkipOutgoing(msg)
+  if skipWhy then
+    WoWTranslate_Diag("WTC_OUTSKIP why=" .. skipWhy ..
+      " type=" .. tostring(chatType) .. " msg=" .. string.sub(msg, 1, 50))
     return origSend(msg, chatType, language, channel)
   end
   outCounter = outCounter + 1
@@ -485,6 +527,14 @@ end
 local bannerShown = false
 local bannerFrame = CreateFrame("Frame")
 bannerFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+local function BannerPrint()
+  if bannerShown then return end
+  bannerShown = true
+  if DEFAULT_CHAT_FRAME then
+    DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.1.0 by ijnokmsc (driver v45, mode=" ..
+      displayMode .. ", outgoing=" .. outgoingMode .. ")")
+  end
+end
 bannerFrame:SetScript("OnEvent", function()
   if bannerShown then return end
   bannerShown = true
@@ -493,12 +543,21 @@ bannerFrame:SetScript("OnEvent", function()
     acc = acc + el
     if acc < 1 then return end
     self:SetScript("OnUpdate", nil)
-    if DEFAULT_CHAT_FRAME then
-      DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.0.0 by ijnokmsc (driver v40, mode=" ..
-        displayMode .. ", outgoing=" .. outgoingMode .. ")")
-    end
+    BannerPrint()
   end)
 end)
+-- v43 兜底：驱动加载晚于 PLAYER_ENTERING_WORLD 时（注入等浅栈窗口有秒级波动），
+-- PEW 事件已错过、横幅永远不显示 → 加载 12 秒后仍未显示则强制打印
+-- （此时加载屏必然已结束；正常路径 PEW+1s 先行，bannerShown 拦住重复）。
+do
+  local acc = 0
+  bannerFrame:SetScript("OnUpdate", function(self, el)
+    acc = acc + el
+    if acc < 12 then return end
+    self:SetScript("OnUpdate", nil)
+    BannerPrint()
+  end)
+end
 
 end  -- WTC_MAIN
 

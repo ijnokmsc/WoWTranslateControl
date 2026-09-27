@@ -223,6 +223,17 @@ public partial class MainWindow : Window
         foreach (System.Windows.Controls.ComboBoxItem item in CmbDirectOutgoing.Items)
             if ((string)item.Tag == _cfg.DirectOutgoingMode) { CmbDirectOutgoing.SelectedItem = item; break; }
 
+        // llama 自动重启（v41）
+        TxtLlamaMemLimit.Text = _cfg.LlamaMemLimitMB.ToString();
+        ChkLlamaAutoRestart.IsChecked = _cfg.LlamaAutoRestart;
+
+        // v41 发送消息过滤器：规则列表 + 外发频道开关（勾选 = 翻译）
+        TxtOutgoingFilter.Text = _cfg.OutgoingFilterRules ?? "";
+        var outOff = new HashSet<string>((_cfg.DirectOutgoingOffChannels ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()));
+        foreach (var (ch, box) in OutChannels())
+            box.IsChecked = !outOff.Contains(ch);
+
         _suppressSlider = true;
 
         ProxyPortText.Text = $" :{_cfg.ListenPort} → :{_cfg.UpstreamPort}";
@@ -368,7 +379,9 @@ public partial class MainWindow : Window
                     {
                         Core.DllSwitcher.WriteDirectConfig(gd, _cfg.ListenPort,
                             _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix, _cfg.DirectOutgoingMode,
-                            dllLog: _cfg.DllLogEnabled);
+                            dllLog: _cfg.DllLogEnabled,
+                            outFilter: _cfg.OutgoingFilterRules,
+                            outOff: _cfg.DirectOutgoingOffChannels);
                         Log("已同步游戏目录 WoWTranslateDirect.json——游戏内 /reload 或重启游戏生效");
                     }
                 }
@@ -744,15 +757,8 @@ public partial class MainWindow : Window
             }
         }
 
-        // 进程可能已自行退出，这里做一次轻量校正
-        if (_llama.State == LlamaState.Running || _llama.State == LlamaState.Starting)
-        {
-            if (!LlamaServerManager.IsPortListening(_cfg.UpstreamPort) &&
-                _llama.State == LlamaState.Running)
-            {
-                // 端口掉线，提示但不强行改状态（可能只是瞬时繁忙）
-            }
-        }
+        // v41 内存超限自动重启：Running 且连续 60 秒超阈值 → 重启（重启后 10 分钟冷却）
+        _llama.CheckMemoryRestart();
     }
 
     /// <summary>
@@ -787,6 +793,7 @@ public partial class MainWindow : Window
 
             BtnStartLlama.IsEnabled = s is LlamaState.Stopped or LlamaState.Crashed;
             BtnStopLlama.IsEnabled = s is LlamaState.Running or LlamaState.Starting;
+            BtnRestartLlama.IsEnabled = s is LlamaState.Running or LlamaState.Starting;
             KeepFocusStable();
         }));
     }
@@ -930,6 +937,13 @@ public partial class MainWindow : Window
 
     private void BtnTrackDirect_Click(object sender, RoutedEventArgs e)
     {
+        // 手动重装 = 解除卸载锁（SkipAutoDeploy），允许此后恢复自动部署
+        if (_cfg.SkipAutoDeploy)
+        {
+            _cfg.SkipAutoDeploy = false;
+            _cfg.Save();
+            Log("已解除卸载标记，恢复自动部署。");
+        }
         AutoDeployTrackB();
         RefreshDllStatus();
     }
@@ -949,7 +963,9 @@ public partial class MainWindow : Window
             {
                 Core.DllSwitcher.WriteDirectConfig(gameDir, _cfg.ListenPort,
                     _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix, _cfg.DirectOutgoingMode,
-                    dllLog: _cfg.DllLogEnabled);
+                    dllLog: _cfg.DllLogEnabled,
+                    outFilter: _cfg.OutgoingFilterRules,
+                    outOff: _cfg.DirectOutgoingOffChannels);
                 Log($"已更新游戏目录 WoWTranslateDirect.json（displayMode={_cfg.DirectDisplayMode}，outgoing={_cfg.DirectOutgoingMode}，log={_cfg.DllLogEnabled}，游戏内 /reload 生效）");
             }
         }
@@ -986,7 +1002,9 @@ public partial class MainWindow : Window
                 v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() ?? "" : "";
             var synced = Get("displayMode") == _cfg.DirectDisplayMode &&
                          Get("displayPrefix") == _cfg.DirectDisplayPrefix &&
-                         Get("outgoingMode") == _cfg.DirectOutgoingMode;
+                         Get("outgoingMode") == _cfg.DirectOutgoingMode &&
+                         Get("outFilter") == (_cfg.OutgoingFilterRules ?? "") &&
+                         Get("outOff") == (_cfg.DirectOutgoingOffChannels ?? "");
             TxtDirectDisplayHint.Text = synced
                 ? "✔ 已与游戏目录配置同步；游戏内 /reload 或重启客户端生效。"
                 : "⚠ 界面配置与游戏目录不一致，改动任一设置即可自动写入；游戏内 /reload 或重启客户端生效。";
@@ -1048,6 +1066,12 @@ public partial class MainWindow : Window
     /// <summary>游戏目录有效时自动部署主推轨道 B（用户无需选择轨道）。</summary>
     private void AutoDeployTrackB()
     {
+        // 用户卸载后不再悄悄重装；点「重新部署 Direct DLL」可恢复（会清掉该标记）
+        if (_cfg.SkipAutoDeploy)
+        {
+            Log("ℹ 已跳过自动部署（此前卸载过 Direct DLL）；需要重装请点「重新部署 Direct DLL」。");
+            return;
+        }
         try
         {
             var gameDir = TxtGameDir.Text.Trim();
@@ -1055,7 +1079,8 @@ public partial class MainWindow : Window
             var assets = System.IO.Path.Combine(AppContext.BaseDirectory, "assets", "direct-dll");
             var lines = Core.DllSwitcher.EnsureDeployed(gameDir, assets,
                 _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix, _cfg.DirectOutgoingMode,
-                listenPort: _cfg.ListenPort, dllLog: _cfg.DllLogEnabled);
+                listenPort: _cfg.ListenPort, dllLog: _cfg.DllLogEnabled,
+                outFilter: _cfg.OutgoingFilterRules, outOff: _cfg.DirectOutgoingOffChannels);
             foreach (var l in lines) Log(l);
             RefreshDllStatus();
         }
@@ -1089,6 +1114,91 @@ public partial class MainWindow : Window
         var mode = (string)item.Tag;
         if (mode == _cfg.DirectOutgoingMode) return;
         _cfg.DirectOutgoingMode = mode;
+        SyncDirectConfigToGameDir();
+    }
+
+    // ==================== 卸载 Direct DLL（v41 智能卸载） ====================
+
+    private void BtnUninstallDirect_Click(object sender, RoutedEventArgs e)
+    {
+        var gameDir = TxtGameDir.Text.Trim();
+        if (MessageBox.Show(this,
+                "将从游戏目录卸载 Direct DLL（dinput8.dll / WoWTranslateDirect.dll / dlls.txt / WoWTranslateDirect.json）。\n\n" +
+                "部署前的原有文件会自动从 wtc_backup 还原；卸载后控制台不再自动重装，点「重新部署 Direct DLL」可恢复。\n\n继续卸载？",
+                "卸载 Direct DLL", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        var assets = System.IO.Path.Combine(AppContext.BaseDirectory, "assets", "direct-dll");
+        foreach (var l in Core.DllSwitcher.UninstallDirect(gameDir, assets))
+            Log(l);
+        // 卸载生效才置防重装标记（未部署/被拒绝时不动）
+        if (Core.DllSwitcher.Probe(gameDir, assets).Current != Core.DllSwitcher.TrackDirect)
+        {
+            _cfg.SkipAutoDeploy = true;
+            _cfg.Save();
+        }
+        RefreshDllStatus();
+    }
+
+    // ==================== llama 重启与内存阈值（v41） ====================
+
+    private void BtnRestartLlama_Click(object sender, RoutedEventArgs e)
+    {
+        if (_llama == null) return;
+        // Stop 最长等 3 秒退出，放后台避免卡 UI；状态经 OnStateChanged 回 UI
+        System.Threading.Tasks.Task.Run(() => _llama.Restart("手动重启"));
+    }
+
+    private void TxtLlamaMemLimit_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        if (!int.TryParse(TxtLlamaMemLimit.Text.Trim(), out var mb)) mb = 4096;
+        mb = Math.Clamp(mb, 512, 65536);
+        TxtLlamaMemLimit.Text = mb.ToString();
+        if (mb == _cfg.LlamaMemLimitMB) return;
+        _cfg.LlamaMemLimitMB = mb;
+        _cfg.Save();
+        Log($"llama 内存阈值已设为 {mb} MB（持续超限 60 秒自动重启，重启后 10 分钟冷却）");
+    }
+
+    private void ChkLlamaAutoRestart_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        _cfg.LlamaAutoRestart = ChkLlamaAutoRestart.IsChecked == true;
+        _cfg.Save();
+        Log($"llama 自动重启（内存超限/崩溃拉起）已{(_cfg.LlamaAutoRestart ? "开启" : "关闭")}");
+    }
+
+    // ==================== 发送消息过滤器（v41） ====================
+
+    /// <summary>外发频道开关（勾选 = 翻译）：频道常量 ↔ 复选框。</summary>
+    private (string Channel, System.Windows.Controls.CheckBox Box)[] OutChannels() => new[]
+    {
+        ("SAY", ChkOutSay), ("YELL", ChkOutYell), ("WHISPER", ChkOutWhisper),
+        ("PARTY", ChkOutParty), ("GUILD", ChkOutGuild), ("OFFICER", ChkOutOfficer),
+        ("RAID", ChkOutRaid), ("RAID_WARNING", ChkOutRaidWarn),
+        ("BATTLEGROUND", ChkOutBg), ("CHANNEL", ChkOutChannel),
+    };
+
+    private string BuildOutgoingOffChannels() =>
+        string.Join(",", OutChannels().Where(c => c.Box.IsChecked != true).Select(c => c.Channel));
+
+    private void OutChannel_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        _cfg.DirectOutgoingOffChannels = BuildOutgoingOffChannels();
+        _cfg.Save();
+        SyncDirectConfigToGameDir();
+    }
+
+    private void TxtOutgoingFilter_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        var rules = TxtOutgoingFilter.Text.Replace("\r\n", "\n").TrimEnd('\n');
+        TxtOutgoingFilter.Text = rules;
+        if (rules == _cfg.OutgoingFilterRules) return;
+        _cfg.OutgoingFilterRules = rules;
+        _cfg.Save();
         SyncDirectConfigToGameDir();
     }
 }

@@ -29,6 +29,24 @@ public sealed class LlamaServerManager : IDisposable
     private readonly object _sync = new();
     private DateTime _startedAt;
 
+    // 生命周期锁：Start/Stop/Restart 与 Exited 回调（线程池线程）互斥。
+    // Monitor 可重入，Restart 内部再调 Stop/Start 不会自锁。
+    private readonly object _lifeSync = new();
+
+    // 主动停止标志：置位后 Exited 不再报 Crashed（Stop 等 Kill 完成后，
+    // Exited 事件仍可能异步迟到，单靠时序判断会误报）。
+    private volatile bool _stopping;
+
+    // 内存超限自动重启（v41）
+    private int _memOverSeconds;
+    private DateTime _memCooldownUntil = DateTime.MinValue;
+    private DateTime _lastAutoRestart = DateTime.MinValue;
+
+    private const int MemOverSecondsToRestart = 60;     // 连续超限秒数
+    private const int MemRestartCooldownMinutes = 10;   // 重启后冷却，防反复拉起
+    private const int CrashAutoRestartGapMinutes = 5;   // 崩溃自动拉起最小间隔
+    private const int CrashAutoRestartDelayMs = 5000;   // 崩溃后延迟拉起，给退出收尾留时间
+
     public LlamaState State { get; private set; } = LlamaState.Stopped;
     public int? Pid => _proc?.Id;
     public TimeSpan Uptime => State == LlamaState.Running || State == LlamaState.Starting
@@ -99,91 +117,156 @@ public sealed class LlamaServerManager : IDisposable
 
     public bool Start()
     {
-        if (State == LlamaState.Running || State == LlamaState.Starting)
+        lock (_lifeSync)
         {
-            OnLog?.Invoke("llama-server 已在运行中");
-            return true;
-        }
-
-        var exe = Path.Combine(_cfg.LlamaDir, "llama-server.exe");
-        if (!File.Exists(exe))
-        {
-            OnLog?.Invoke($"未找到可执行文件：{exe}");
-            State = LlamaState.Crashed;
-            OnStateChanged?.Invoke(State);
-            return false;
-        }
-
-        var modelPath = Path.IsPathRooted(_cfg.ModelFile)
-            ? _cfg.ModelFile
-            : Path.Combine(_cfg.LlamaDir, _cfg.ModelFile);
-        if (!File.Exists(modelPath))
-        {
-            OnLog?.Invoke($"未找到模型文件：{modelPath}");
-            State = LlamaState.Crashed;
-            OnStateChanged?.Invoke(State);
-            return false;
-        }
-
-        if (IsPortListening(_cfg.UpstreamPort))
-        {
-            OnLog?.Invoke($"端口 {_cfg.UpstreamPort} 已被占用，可能有其他实例在运行。" +
-                          "将直接视为已就绪。");
-            State = LlamaState.Running;
-            _startedAt = DateTime.Now;
-            OnStateChanged?.Invoke(State);
-            return true;
-        }
-
-        try
-        {
-            var psi = new ProcessStartInfo
+            if (State == LlamaState.Running || State == LlamaState.Starting)
             {
-                FileName = exe,
-                Arguments = BuildArguments(),
-                WorkingDirectory = _cfg.LlamaDir,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
-            };
+                OnLog?.Invoke("llama-server 已在运行中");
+                return true;
+            }
+            _stopping = false;
 
-            _proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
-            _proc.OutputDataReceived += (_, e) => Append(e.Data);
-            _proc.ErrorDataReceived += (_, e) => Append(e.Data);
-            _proc.Exited += (_, _) =>
+            var exe = Path.Combine(_cfg.LlamaDir, "llama-server.exe");
+            if (!File.Exists(exe))
             {
-                // 进程意外退出
-                if (State != LlamaState.Stopped)
+                OnLog?.Invoke($"未找到可执行文件：{exe}");
+                State = LlamaState.Crashed;
+                OnStateChanged?.Invoke(State);
+                return false;
+            }
+
+            var modelPath = Path.IsPathRooted(_cfg.ModelFile)
+                ? _cfg.ModelFile
+                : Path.Combine(_cfg.LlamaDir, _cfg.ModelFile);
+            if (!File.Exists(modelPath))
+            {
+                OnLog?.Invoke($"未找到模型文件：{modelPath}");
+                State = LlamaState.Crashed;
+                OnStateChanged?.Invoke(State);
+                return false;
+            }
+
+            if (IsPortListening(_cfg.UpstreamPort))
+            {
+                OnLog?.Invoke($"端口 {_cfg.UpstreamPort} 已被占用，可能有其他实例在运行。" +
+                              "将直接视为已就绪。");
+                State = LlamaState.Running;
+                _startedAt = DateTime.Now;
+                OnStateChanged?.Invoke(State);
+                return true;
+            }
+
+            try
+            {
+                var psi = new ProcessStartInfo
                 {
+                    FileName = exe,
+                    Arguments = BuildArguments(),
+                    WorkingDirectory = _cfg.LlamaDir,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    StandardOutputEncoding = Encoding.UTF8,
+                    StandardErrorEncoding = Encoding.UTF8,
+                };
+
+                _proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
+                _proc.OutputDataReceived += (_, e) => Append(e.Data);
+                _proc.ErrorDataReceived += (_, e) => Append(e.Data);
+                _proc.Exited += (_, _) =>
+                {
+                    // 主动停止/重启期间迟到的退出事件不报 Crashed
+                    if (_stopping || State == LlamaState.Stopped) return;
                     State = LlamaState.Crashed;
                     OnLog?.Invoke($"llama-server 进程已退出（ExitCode={SafeExitCode()}）");
                     OnStateChanged?.Invoke(State);
-                }
-            };
+                    TryAutoRestartAfterCrash();
+                };
 
-            _proc.Start();
-            _proc.BeginOutputReadLine();
-            _proc.BeginErrorReadLine();
+                _proc.Start();
+                _proc.BeginOutputReadLine();
+                _proc.BeginErrorReadLine();
 
-            _startedAt = DateTime.Now;
-            State = LlamaState.Starting;
-            OnStateChanged?.Invoke(State);
-            OnLog?.Invoke($"llama-server 启动中 (PID {_proc.Id})，参数：{BuildArguments()}");
+                _startedAt = DateTime.Now;
+                State = LlamaState.Starting;
+                OnStateChanged?.Invoke(State);
+                OnLog?.Invoke($"llama-server 启动中 (PID {_proc.Id})，参数：{BuildArguments()}");
 
-            // 异步等待端口就绪，不阻塞 UI 线程
-            _ = WaitForReadyAsync();
-            return true;
+                // 异步等待端口就绪，不阻塞 UI 线程
+                _ = WaitForReadyAsync();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                OnLog?.Invoke($"启动失败：{ex.Message}");
+                State = LlamaState.Crashed;
+                OnStateChanged?.Invoke(State);
+                return false;
+            }
         }
-        catch (Exception ex)
+    }
+
+    /// <summary>崩溃后自动拉起：受 LlamaAutoRestart 开关与最小间隔（防连崩循环）约束。</summary>
+    private void TryAutoRestartAfterCrash()
+    {
+        if (!_cfg.LlamaAutoRestart) return;
+        var now = DateTime.Now;
+        lock (_lifeSync)
         {
-            OnLog?.Invoke($"启动失败：{ex.Message}");
-            State = LlamaState.Crashed;
-            OnStateChanged?.Invoke(State);
-            return false;
+            if (State != LlamaState.Crashed) return;
+            if ((now - _lastAutoRestart).TotalMinutes < CrashAutoRestartGapMinutes)
+            {
+                OnLog?.Invoke($"距上次自动重启不足 {CrashAutoRestartGapMinutes} 分钟" +
+                              "（疑似连续崩溃），已暂停自动拉起，请手动排查。");
+                return;
+            }
+            _lastAutoRestart = now;
         }
+        OnLog?.Invoke($"{CrashAutoRestartDelayMs / 1000} 秒后自动重启 llama-server…");
+        Task.Delay(CrashAutoRestartDelayMs).ContinueWith(_ =>
+        {
+            lock (_lifeSync)
+            {
+                if (State == LlamaState.Crashed) Start();
+            }
+        });
+    }
+
+    /// <summary>重启 llama-server（先杀干净再拉起）。reason 写入事件日志。</summary>
+    public void Restart(string reason)
+    {
+        lock (_lifeSync)
+        {
+            OnLog?.Invoke($"llama-server 重启：{reason}");
+            Stop();
+            Start();
+        }
+    }
+
+    /// <summary>
+    /// 每秒调用（UpdateClock 节拍）：Running 且工作集连续超阈值 60 秒 →
+    /// 后台自动重启回收内存；重启后 10 分钟冷却期内不再触发。
+    /// </summary>
+    public void CheckMemoryRestart()
+    {
+        if (!_cfg.LlamaAutoRestart) return;
+        if (State != LlamaState.Running) { _memOverSeconds = 0; return; }
+        var mem = WorkingSetMB;
+        if (!mem.HasValue || mem.Value <= _cfg.LlamaMemLimitMB)
+        {
+            _memOverSeconds = 0;
+            return;
+        }
+        if (DateTime.Now < _memCooldownUntil) return;   // 冷却期：不累计不触发
+        _memOverSeconds++;
+        if (_memOverSeconds < MemOverSecondsToRestart) return;
+        _memOverSeconds = 0;
+        _memCooldownUntil = DateTime.Now.AddMinutes(MemRestartCooldownMinutes);
+        var mb = mem.Value;
+        var limit = _cfg.LlamaMemLimitMB;
+        Task.Run(() => Restart(
+            $"内存超限 {mb:N0} MB > 阈值 {limit} MB，持续 {MemOverSecondsToRestart} 秒"));
     }
 
     private int SafeExitCode()
@@ -232,7 +315,11 @@ public sealed class LlamaServerManager : IDisposable
 
     public void Stop()
     {
-        if (_proc is { HasExited: false })
+        lock (_lifeSync)
+        {
+            // 先置主动停止标志：Kill 后 Exited 事件可能异步迟到，避免误报 Crashed
+            _stopping = true;
+            if (_proc is { HasExited: false })
         {
             try
             {
@@ -252,10 +339,11 @@ public sealed class LlamaServerManager : IDisposable
             OnLog?.Invoke("llama-server 未在运行");
         }
 
-        _proc?.Dispose();
-        _proc = null;
-        State = LlamaState.Stopped;
-        OnStateChanged?.Invoke(State);
+            _proc?.Dispose();
+            _proc = null;
+            State = LlamaState.Stopped;
+            OnStateChanged?.Invoke(State);
+        }
     }
 
     private void Append(string? line)
@@ -291,6 +379,7 @@ public sealed class LlamaServerManager : IDisposable
 
     public void Dispose()
     {
+        _stopping = true;   // 退出期不触发 Crashed 事件与自动拉起
         if (_proc is { HasExited: false })
         {
             try { _proc.Kill(entireProcessTree: true); } catch { }

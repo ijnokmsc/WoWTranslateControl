@@ -28,6 +28,15 @@ public sealed class AppConfig
     public int UpstreamPort { get; set; } = 8081;
     public bool AutoStartLlama { get; set; } = true;
 
+    /// <summary>
+    /// llama-server 工作集内存阈值（MB），持续超限约 60 秒自动重启回收。
+    /// 1.8B Q4 模型基线约 1.5-2 GB，长跑增长（碎片/KV 缓存）超 4 GB 即视为泄漏。
+    /// </summary>
+    public int LlamaMemLimitMB { get; set; } = 4096;
+
+    /// <summary>总开关：内存超限自动重启 + 崩溃后自动拉起 llama-server。</summary>
+    public bool LlamaAutoRestart { get; set; } = true;
+
     // ---------- 代理 ----------
     public int ListenPort { get; set; } = 8080;
     public bool ProxyAutoStart { get; set; } = true;
@@ -192,6 +201,22 @@ public sealed class AppConfig
     /// "both" = 原文和英文都发。随 WoWTranslateDirect.json 写入游戏目录，重登生效。
     /// </summary>
     public string DirectOutgoingMode { get; set; } = "replace";
+
+    /// <summary>
+    /// v41 发送消息过滤器：免翻译前缀规则，每行一条，消息以其开头则原样发送不翻译。
+    /// 另有内置恒生效规则：首字符 . 或 。（私服命令）在驱动 Lua 里硬编码，不在此列。
+    /// 随 WoWTranslateDirect.json 的 outFilter 键同步到 DLL。
+    /// </summary>
+    public string OutgoingFilterRules { get; set; } = ".\n。";
+
+    /// <summary>
+    /// v41 外发频道开关：不翻译的频道列表（逗号分隔的大写频道名，如 "WHISPER,CHANNEL"），
+    /// 空 = 全部频道都翻译。随 WoWTranslateDirect.json 的 outOff 键同步到 DLL。
+    /// </summary>
+    public string DirectOutgoingOffChannels { get; set; } = "";
+
+    /// <summary>用户点了「卸载 Direct DLL」后置位：阻止启动/改目录时的自动部署悄悄重装。点「重新部署」时清除。</summary>
+    public bool SkipAutoDeploy { get; set; } = false;
 
     // ---------- 内部质检规则说明（只读；R1-R6 用户内容规则已随 GS 插件链路移除） ----------
     [JsonIgnore]

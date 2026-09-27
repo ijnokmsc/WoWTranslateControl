@@ -185,7 +185,7 @@ static int PushResult(lua_State* L, const std::string& gbkOrAscii)
 // ---- Version: () → 版本串 ----
 WT_NOINLINE static int L_Version_impl(lua_State* L)
 {
-    return PushResult(L, "WoWTranslateDirect 3.0.0 (Track B) by ijnokmsc");
+    return PushResult(L, "WoWTranslateDirect 3.1.0 (Track B) by ijnokmsc");
 }
 WT_NOINLINE static int L_Version(lua_State* L)
 {
@@ -579,6 +579,9 @@ static lua_State* volatile g_globalL = NULL;      // 已注册的全局状态
 static lua_State* volatile g_confirmedL = NULL;   // 已见 depth>0（真实脚本执行）的全局状态
 static lua_State* volatile g_seenGlobalL = NULL;  // 上次观察到的 *(profile.globalLPtr)，用于状态切换日志
 static volatile LONG g_registerDone = 0;
+static DWORD g_regGT = 0;                          // 注册成功时的 gt（全局表）指针——v44 状态复用检测
+static volatile LONG g_apiProbeCount = 0;          // 已加载态的低频 API 探针计数（每 ~1000 次 gettop）
+static volatile LONG g_gettopCalls = 0;            // 钩子活动计数（心跳诊断用，非原子、允许近似）
 
 // ==================== v16：驱动 Lua 注入（全自治模式）====================
 
@@ -587,6 +590,8 @@ static std::string g_displayMode   = "replace";   // "replace" | "both"
 static std::string g_displayPrefix = "[译]";      // UTF-8（客户端为 UTF-8 通道）
 static std::string g_outgoingMode  = "off";       // "off" | "replace" | "both"
 static int         g_outTimeout    = 25;        // 外发译文等待秒数
+static std::string g_outFilter;                   // v41 免翻译前缀规则（多行，每行一条）
+static std::string g_outOff;                      // v41 外发禁用频道（逗号分隔，空=全开）
 
 static std::string g_driverChunk;                 // 配置前缀 + 驱动 Lua，RebuildDriverChunk 组装
 static HMODULE g_hSelfModule = NULL;              // 引擎自身句柄（DllMain 传入；日志/配置路径用）
@@ -605,6 +610,10 @@ static void ApplyDisplayKeys(const json& disp)
         g_outgoingMode = "off";
     if (disp.contains("outTimeout") && disp["outTimeout"].is_number())
         g_outTimeout = (std::max)(5, (std::min)(60, disp["outTimeout"].get<int>()));
+    if (disp.contains("outFilter") && disp["outFilter"].is_string())
+        g_outFilter = disp["outFilter"].get<std::string>();
+    if (disp.contains("outOff") && disp["outOff"].is_string())
+        g_outOff = disp["outOff"].get<std::string>();
     if (disp.contains("log") && disp["log"].is_boolean())
         wt::wtSetLogEnabled(disp["log"].get<bool>());
 }
@@ -616,12 +625,16 @@ static void RebuildDriverChunk()
     const char* part2 = "',prefix='";
     const char* part3 = "',outgoing='";
     const char* part4 = "',outTimeout=";
-    const char* part5 = "}\n";
+    const char* part5 = ",outfilter='";   // v41 免翻译前缀规则（LuaEscape 可转义多行）
+    const char* part6 = "',outoff='";
+    const char* part7 = "'}\n";
     g_driverChunk = std::string(part1) + wt::LuaEscape(g_displayMode) +
                     part2 + wt::LuaEscape(g_displayPrefix) +
                     part3 + wt::LuaEscape(g_outgoingMode) +
                     part4 + std::to_string(g_outTimeout) +
-                    part5 +
+                    part5 + wt::LuaEscape(g_outFilter) +
+                    part6 + wt::LuaEscape(g_outOff) +
+                    part7 +
                     wt::DriverLuaCode();
 }
 
@@ -688,6 +701,9 @@ static int ExecuteDriverChunk()
 // ⚠ 绝不能在 InitThread 等非主线程调 FrameScript_Execute —— Lua 状态非线程安全。
 // v17：chunk 带就绪门禁（UI 未就绪时静默返回，绝不抛 Lua 错误），只有 chunk 调
 // WoWTranslate_Diag("WTC_DRIVER_OK") 才算成功；否则 500ms 后重试直到上限。
+static bool ApiPresentOnState(lua_State* L);
+static void ForceReregister(const char* why);
+
 static void TryInjectDriver(lua_State* L)
 {
     if (g_driverDone) return;
@@ -721,6 +737,15 @@ static void TryInjectDriver(lua_State* L)
     }
 
     InterlockedExchange(&g_driverReported, 0);
+    // v44：执行前校验执行状态上 API 真实存在——同址复用（连 gt 都同址）且
+    // 处于注入重试循环时，chunk 会被 Lua 防线拦下空转到上限，此处直接
+    // 判定状态已被替换 → 强制重注册，避免静默死亡窗口。
+    if (g_regGT && !ApiPresentOnState(L))
+    {
+        InterlockedExchange(&g_driverBusy, 0);
+        ForceReregister("api globals missing before inject");
+        return;
+    }
     int rc = ExecuteDriverChunk();
 
     char buf[160];
@@ -788,14 +813,80 @@ static void TryInjectDriver(lua_State* L)
     }
 }
 
+// v45：读指定状态上的全局 WoWTranslate_Version 是否存在。直接复用注册自检的
+// VisibilityTT（TValue 直读类型，处理 __index 链，栈自平衡）——v44 曾用
+// p_tolstring 判存在，但该全局的值是 C 函数，tolstring 对函数返回 NULL，
+// 探针恒报"缺失"→ 注册/重注册死循环（2026-09-28 Frostmourne 实测）。
+static bool ApiPresentOnState(lua_State* L)
+{
+    if (!p_pushstring || !p_rawget || !p_settop || !g_pTrampoline) return true;
+    __try
+    {
+        return (VisibilityTT(L) & 0x1F) == 6;        // LUA_TFUNCTION
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return true;                                 // 读取异常时不拦截（保守）
+    }
+}
+
+// v44：判定当前 L 是"同地址的新状态"（地址复用）→ 作废全部注册/注入状态机，
+// 下一个浅栈 gettop 走完整注册流程重新来过。
+static void ForceReregister(const char* why)
+{
+    char b[160];
+    _snprintf(b, sizeof(b), "state replaced under same L: %s -> full re-register", why);
+    WT_LOG_INFO(b);
+    InterlockedExchange(&g_registerDone, 0);
+    g_globalL = NULL;
+    InterlockedExchange(&g_driverDone, 0);
+    InterlockedExchange(&g_driverAttempts, 0);
+    InterlockedExchange(&g_attemptCount, 0);
+    InterlockedExchange(&g_gateLogCount, 0);
+    InterlockedExchange(&g_injectDepthSkips, 0);
+    g_seenGlobalL = NULL;
+    g_confirmedL = NULL;
+    g_regGT = 0;
+}
+
 static void OnGetTop(lua_State* L)
 {
     if (!L) return;
+    g_gettopCalls++;                               // v44 心跳诊断：钩子活动计数
     if (g_registerDone && L == g_globalL)
     {
-        // 注册完成后的唯一入口：等待空栈边界注入驱动 Lua（一次性）
-        if (!g_driverDone && g_driverChunk.size() > 0 && p_Execute)
-            TryInjectDriver(L);
+        // v42：只有"当前全局状态"才允许注入驱动脚本。ExecuteDriverChunk 内部的
+        // FrameScript_Execute 用 *globalLPtr（客户端当前全局状态）执行，而不是
+        // 这里的 L——旧状态在全局指针切换后迟到的一次 gettop 会把 chunk 注进
+        // 尚未注册 API 的新状态：过滤器空转、每条聊天抛 attempt to call
+        // 'WoWTranslate_Diag' (nil) 且消息被静默吞掉（Frostmourne 实测）。
+        // 拦掉后，新状态的 gettop 会走下方切换分支重注册 → 干净重注入。
+        lua_State* curNow = *(lua_State**)(uintptr_t)g_prof->globalLPtr;
+        if (curNow == L)
+        {
+            // v44：地址复用检测。新状态与旧注册状态同地址时，指针比较永远
+            // "没切换"→ 不重注册、不重注入，驱动静默死亡（无横幅无翻译无报错）。
+            // 判据一：gt（全局表）指针与注册时不同；判据二（已加载态低频探针）：
+            // API 全局缺失。任一命中 → 作废状态机强制重注册。
+            DWORD gtNow = *(DWORD*)((BYTE*)L + 0x48);
+            if (g_regGT && gtNow != g_regGT)
+            {
+                ForceReregister("gt pointer changed under same L");
+                return;
+            }
+            if (g_driverDone &&
+                InterlockedIncrement(&g_apiProbeCount) >= 1000)
+            {
+                InterlockedExchange(&g_apiProbeCount, 0);
+                if (!ApiPresentOnState(L))
+                {
+                    ForceReregister("api globals missing under same L");
+                    return;
+                }
+            }
+            if (!g_driverDone && g_driverChunk.size() > 0 && p_Execute)
+                TryInjectDriver(L);
+        }
         return;
     }
 
@@ -814,6 +905,7 @@ static void OnGetTop(lua_State* L)
         InterlockedExchange(&g_driverAttempts, 0);
         InterlockedExchange(&g_gateLogCount, 0);   // 探针按状态重置：登录态 nil ≠ 世界态
         InterlockedExchange(&g_injectDepthSkips, 0);
+        InterlockedExchange(&g_apiProbeCount, 0);  // v44
         RefreshDriverConfig();
     }
 
@@ -856,6 +948,7 @@ static void OnGetTop(lua_State* L)
     if (rc == 0)
     {
         g_globalL = L;
+        g_regGT = *(DWORD*)((BYTE*)L + 0x48);       // v44：记录 gt，供同址复用检测
         InterlockedExchange(&g_registerDone, 1);
         int depthAfter = ((fn_lua_gettop)g_pTrampoline)(L); // GS 同款栈恢复验证
         char buf[160];
@@ -1074,7 +1167,7 @@ static DWORD WINAPI InitThread(LPVOID)
 {
     wt::wtSetSelfModule(g_hSelfModule);
     wt::LogInit();
-    WT_LOG_INFO("WoWTranslateDirect 3.0.0 init (Track B direct engine) by ijnokmsc");
+    WT_LOG_INFO("WoWTranslateDirect 3.1.0 init (Track B direct engine) by ijnokmsc");
     AutoConfigure();
 
     // ⚠ GS 原版时序复刻："Init thread started, sleeping 3s... → Attempting hook..."
@@ -1128,7 +1221,43 @@ static DWORD WINAPI InitThread(LPVOID)
         return 1;
     }
     WT_LOG_INFO("inline hook on lua_gettop installed, waiting for L capture");
-    return 0;
+
+    // v44 钩子存活心跳：本线程转为监控线程，每 30s 自查钩子字节 + 输出状态机
+    // 快照。Frostmourne 2026-09-28 实测：钩子安装 53s 后静默失效（无报错、
+    // 日志截止、世界态完全失联），疑为 rebuffed.dll 延迟完整性扫描恢复原字节
+    // （静默拔钩）。心跳让死亡时刻与当时状态直接进日志；字节被还原时按
+    // ERROR 级别记录。
+    DWORD lastHooked = 2;
+    LONG beat = 0;
+    for (;;)
+    {
+        Sleep(30000);
+        beat++;
+        BYTE now[6];
+        memcpy(now, g_hookTarget, 6);   // .text 页 EXECUTE_READ，可读
+        bool hooked = memcmp(now, g_origBytes, 6) != 0;
+        char hb[240];
+        _snprintf(hb, sizeof(hb),
+                  "hook heartbeat: bytes=%s calls=%d globalL=0x%08X regDone=%d driverDone=%d attempts=%d",
+                  hooked ? "hooked" : "ORIGINAL(removed)",
+                  (int)g_gettopCalls,
+                  (unsigned)(uintptr_t)g_globalL,
+                  (int)g_registerDone, (int)g_driverDone, (int)g_driverAttempts);
+        // 诊断期：状态变化立即记，其余每 10 拍（5 分钟）记一次快照
+        if (hooked != (lastHooked == 1) || (beat % 10) == 0 || beat == 1)
+        {
+            if (hooked) WT_LOG_INFO(hb);
+            else
+            {
+                char e[80];
+                _snprintf(e, sizeof(e), "HOOK BYTES RESTORED: %s",
+                          HexStr(now, 6).c_str());
+                WT_LOG_ERROR(e);
+                WT_LOG_ERROR(hb);
+            }
+            lastHooked = hooked ? 1 : 0;
+        }
+    }
 }
 
 // ==================== 自检导出（游戏外冒烟用）====================

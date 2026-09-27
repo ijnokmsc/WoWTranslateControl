@@ -172,3 +172,112 @@ public class EnsureUpToDateTests
         Assert.Equal("old-version", File.ReadAllText(Path.Combine(game, "WoWTranslateDirect.dll")));
     }
 }
+
+public class UninstallDirectTests
+{
+    private static string TempDir()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "wtc-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    private static string MakeDirectAssets()
+    {
+        var dir = TempDir();
+        File.WriteAllText(Path.Combine(dir, "dinput8.dll"), "fake-dinput-direct");
+        File.WriteAllText(Path.Combine(dir, "WoWTranslateDirect.dll"), "fake-direct-dll");
+        return dir;
+    }
+
+    /// <summary>真实走一遍 DeployDirect：含首次基线备份（用户原有的异构 dinput8.dll / dlls.txt），
+    /// 并预置一份旧版 WTC 引擎备份（模拟 EnsureUpToDate 首次备份旧版本的场景）。</summary>
+    private static string MakeDeployedGameWithBackups(string assets)
+    {
+        var game = TempDir();
+        File.WriteAllText(Path.Combine(game, "Wow.exe"), "fake-wow");
+        File.WriteAllText(Path.Combine(game, "dinput8.dll"), "user-mod-dinput-xyz");  // 其他模组的入口 DLL
+        File.WriteAllText(Path.Combine(game, "dlls.txt"), "OtherMod.dll\n");          // 其他模组的加载列表
+        // 旧版 WTC 引擎先入备份（真机上是 EnsureUpToDate 干的；内容含 WTC 标识串）
+        var bak = Path.Combine(game, "wtc_backup", "direct");
+        Directory.CreateDirectory(bak);
+        File.WriteAllText(Path.Combine(bak, "WoWTranslateDirect.dll"),
+            "old WoWTranslateDirect engine build 3.0.0");
+
+        var lines = DllSwitcher.DeployDirect(game, assets, wowRunning: () => false);
+        Assert.Contains(lines, l => l.StartsWith("✅"));
+        return game;
+    }
+
+    [Fact]
+    public void 卸载_删除轨道文件与配置()
+    {
+        var assets = MakeDirectAssets();
+        var game = MakeDeployedGameWithBackups(assets);
+
+        var lines = DllSwitcher.UninstallDirect(game, assets, wowRunning: () => false);
+
+        Assert.Contains(lines, l => l.StartsWith("✅"));
+        Assert.False(File.Exists(Path.Combine(game, "WoWTranslateDirect.dll")));
+        Assert.False(File.Exists(Path.Combine(game, "WoWTranslateDirect.json")));
+        Assert.NotEqual(DllSwitcher.TrackDirect, DllSwitcher.Probe(game, assets).Current);
+    }
+
+    [Fact]
+    public void 卸载_还原用户原有文件_跳过WTC自有备份()
+    {
+        var assets = MakeDirectAssets();
+        var game = MakeDeployedGameWithBackups(assets);
+
+        var lines = DllSwitcher.UninstallDirect(game, assets, wowRunning: () => false);
+
+        // 用户原有文件：备份与 WTC 资产 MD5 不同且无 WTC 标识 → 还原
+        Assert.Equal("user-mod-dinput-xyz", File.ReadAllText(Path.Combine(game, "dinput8.dll")));
+        Assert.Equal("OtherMod.dll", File.ReadAllText(Path.Combine(game, "dlls.txt")).Trim());
+        // 旧版 WTC 引擎（备份内含 WTC 标识串）→ 不还原，否则卸载形同虚设
+        Assert.False(File.Exists(Path.Combine(game, "WoWTranslateDirect.dll")));
+        Assert.Contains(lines, l => l.Contains("已还原 dinput8.dll"));
+        Assert.Contains(lines, l => l.Contains("已还原 dlls.txt"));
+    }
+
+    [Fact]
+    public void 卸载_游戏运行中拒绝()
+    {
+        var assets = MakeDirectAssets();
+        var game = MakeDeployedGameWithBackups(assets);
+
+        var lines = DllSwitcher.UninstallDirect(game, assets, wowRunning: () => true);
+
+        Assert.Contains(lines, l => l.Contains("Wow.exe 正在运行"));
+        Assert.True(File.Exists(Path.Combine(game, "dinput8.dll")));
+        Assert.Equal(DllSwitcher.TrackDirect, DllSwitcher.Probe(game, assets).Current);
+    }
+
+    [Fact]
+    public void 卸载_未部署_无需卸载()
+    {
+        var game = TempDir();
+        File.WriteAllText(Path.Combine(game, "Wow.exe"), "fake-wow");
+        var assets = MakeDirectAssets();
+
+        var lines = DllSwitcher.UninstallDirect(game, assets, wowRunning: () => false);
+
+        Assert.Contains(lines, l => l.Contains("无需卸载"));
+        Assert.Equal("disabled", DllSwitcher.Probe(game, assets).Current);
+    }
+
+    [Fact]
+    public void 部署配置写入过滤规则与禁用频道()
+    {
+        var game = TempDir();
+        File.WriteAllText(Path.Combine(game, "Wow.exe"), "fake-wow");
+        var assets = MakeDirectAssets();
+
+        DllSwitcher.DeployDirect(game, assets, wowRunning: () => false,
+            outFilter: ".\n。", outOff: "WHISPER,CHANNEL");
+
+        var json = File.ReadAllText(Path.Combine(game, "WoWTranslateDirect.json"));
+        Assert.Contains("\"outFilter\": \".\\n。\"", json);
+        Assert.Contains("\"outOff\": \"WHISPER,CHANNEL\"", json);
+    }
+}
