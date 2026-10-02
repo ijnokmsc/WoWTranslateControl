@@ -1,7 +1,7 @@
 <Window x:Class="WoWTranslateControl.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="WoWTranslate 控制台 v3.0.0 — Direct DLL 翻译 · ijnokmsc"
+        Title="WoWTranslate 控制台 — Direct DLL 翻译 · ijnokmsc"
         Height="760" Width="1240" MinHeight="620" MinWidth="1000"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource BgBrush}"

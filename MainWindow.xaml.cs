@@ -55,6 +55,10 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        // 标题版本号取自程序集版本（随 csproj <Version> 变化），避免 XAML 硬编码漂移
+        Title = $"WoWTranslate 控制台 v{System.Reflection.Assembly.GetEntryAssembly()!.GetName().Version!.ToString(3)}" +
+                " — Direct DLL 翻译 · ijnokmsc";
+
         // 窗口/任务栏图标：从 exe 旁的 assets\app.ico 加载（XAML 相对 URI 在编译后的
         // BAML 里不指向 exe 目录，会抛异常，故用代码加载）
         try
