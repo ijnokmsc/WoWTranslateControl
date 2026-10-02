@@ -100,9 +100,9 @@
      过游戏客户端。
 
   Q：翻译不工作但横幅正常？
-  A：确认 llama-server 与过滤代理都在运行。排错：控制台勾选
-     「DLL 日志」和「写入文件日志」后复现一次，把
-     WoWTranslateDirect.log 和 proxy_traffic.log 发出来即可定位。
+  A：确认 llama-server 与过滤代理都在运行。排错：用 -Debug 参数启动
+     控制台（快捷方式目标末尾加 " -Debug"）后复现一次，程序目录会
+     生成 WoWTranslateDirect.log 与 proxy_traffic.log，发出来即可定位。
 
   Q：EUI 下译文没有替换原文？
   A：EUI 接管了聊天显示路径，"替换"暂不支持（自动表现为追加显示）。

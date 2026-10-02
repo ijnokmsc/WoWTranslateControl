@@ -9,6 +9,12 @@ public partial class App : System.Windows.Application
 {
     private static Mutex? _singleInstanceMutex;
 
+    /// <summary>
+    /// 调试模式：仅由启动参数 -Debug 开启。开启后全部日志生效
+    /// （DLL 日志 / proxy_traffic.log / llama_mem.csv），默认一概不写。
+    /// </summary>
+    public static bool DebugMode { get; private set; }
+
     public App()
     {
         // 全局异常兜底：写 crash.log 后再弹窗，杜绝"运行无反应"式静默崩溃
@@ -17,6 +23,10 @@ public partial class App : System.Windows.Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        DebugMode = e.Args.Any(a =>
+            a.Equals("-Debug", StringComparison.OrdinalIgnoreCase) ||
+            a.Equals("--Debug", StringComparison.OrdinalIgnoreCase));
+
         // 启动自检日志（最早时机）：分发版用户环境各异，崩溃时凭此定位
         // 卡在运行时加载还是托管初始化（80131506 类问题唯一可观测点）
         try
@@ -27,7 +37,8 @@ public partial class App : System.Windows.Application
                 $"  .NET: {Environment.Version}\n" +
                 $"  OS: {Environment.OSVersion.VersionString}\n" +
                 $"  exe: {Environment.ProcessPath}\n" +
-                $"  64bit: {Environment.Is64BitProcess}\n");
+                $"  64bit: {Environment.Is64BitProcess}\n" +
+                $"  debug: {DebugMode}\n");
         }
         catch { }
 

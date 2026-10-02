@@ -177,9 +177,6 @@ public sealed class AppConfig
     /// <summary>实时流量列表只显示带频道标签的聊天消息（隐藏战斗/拾取/伤亡等系统播报）。</summary>
     public bool TrafficOnlyChannel { get; set; } = false;
 
-    /// <summary>是否把过滤与转发明细写入文件日志。</summary>
-    public bool WriteFileLog { get; set; } = false;   // 发布版默认关（避免玩家目录写日志），排错时在界面勾选打开
-
     /// <summary>最小化/关闭时缩到系统托盘（双击托盘还原，托盘菜单可真正退出）。</summary>
     public bool MinimizeToTray { get; set; } = true;
 
@@ -192,9 +189,6 @@ public sealed class AppConfig
 
     /// <summary>Track B both 模式的译文行前缀。</summary>
     public string DirectDisplayPrefix { get; set; } = "[译]";
-
-    /// <summary>游戏目录 DLL 文件日志（WoWTranslateDirect.log）开关。默认关，排错时打开。</summary>
-    public bool DllLogEnabled { get; set; } = false;
 
     /// <summary>
     /// Track B 外发翻译模式："off" = 关闭；"replace" = 你发的中文只发英文译文（失败发原文）；

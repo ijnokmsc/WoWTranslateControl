@@ -163,10 +163,10 @@
                             <CheckBox x:Name="ChkTray" Content="最小化/关闭时缩到托盘（双击还原）"
                                       Margin="0,6,0,0" Checked="Tray_Changed"
                                       Unchecked="Tray_Changed" />
-                            <CheckBox x:Name="ChkFileLog" Content="写入文件日志 proxy_traffic.log（排错用，默认关）"
-                                      Checked="ChkFileLog_Changed" Unchecked="ChkFileLog_Changed" />
-                            <CheckBox x:Name="ChkDllLog" Content="DLL 日志 WoWTranslateDirect.log（排错用，默认关）"
-                                      Checked="ChkDllLog_Changed" Unchecked="ChkDllLog_Changed" />
+                            <CheckBox x:Name="ChkFileLog" Content="文件日志 proxy_traffic.log（-Debug 启动参数控制）"
+                                      ToolTip="由启动参数 -Debug 统一开启，界面不可勾选" />
+                            <CheckBox x:Name="ChkDllLog" Content="DLL 日志 WoWTranslateDirect.log（-Debug 启动参数控制）"
+                                      ToolTip="由启动参数 -Debug 统一开启，界面不可勾选" />
                         </StackPanel>
                     </Border>
 

@@ -8,7 +8,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>WoWTranslateControl</AssemblyName>
     <RootNamespace>WoWTranslateControl</RootNamespace>
-    <Version>3.1.1</Version>
+    <Version>3.1.2</Version>
     <Authors>ijnokmsc</Authors>
     <Product>WoWTranslateControl by ijnokmsc</Product>
     <Description>WoWTranslate 本地翻译服务控制台：消息过滤管线 + 术语表 + llama-server 启停 + 多 Provider</Description>

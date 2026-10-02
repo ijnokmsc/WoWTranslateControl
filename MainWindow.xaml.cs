@@ -106,6 +106,9 @@ public partial class MainWindow : Window
 
         Log($"已加载配置：llama 目录 {_cfg.LlamaDir}，模型 {_cfg.ModelFile}，" +
             $"监听 {_cfg.ListenPort} → 上游 {_cfg.UpstreamPort}");
+        Log(App.DebugMode
+            ? "调试模式：已由 -Debug 启动参数开启全部日志（DLL 日志 / proxy_traffic.log / llama_mem.csv）"
+            : "调试模式：未开启（日志一概不写；需要排错时加 -Debug 启动参数）");
 
         // 便携化：运行目录下生成 llama.cpp 目录（新用户把下载/解压的文件放这里即可）
         try { Directory.CreateDirectory(_cfg.LlamaDir); } catch { }
@@ -133,9 +136,10 @@ public partial class MainWindow : Window
                 if (_cfg.ProxyAutoStart) StartProxy();
                 // 启动过程禁用/启用按钮会移动键盘焦点，WPF 顺链 BringIntoView
                 // 把左栏滚到底部（用户误以为"过滤规则盖住了其他卡片"）——
-                // 全部服务就绪后滚回顶部并把焦点还给第一个按钮
+                // 全部服务就绪后滚回顶部；仅未设置游戏目录时才聚焦该输入框引导填写
                 LeftScroll.ScrollToTop();
-                TxtGameDir.Focus();
+                if (string.IsNullOrWhiteSpace(TxtGameDir.Text))
+                    TxtGameDir.Focus();
             }), DispatcherPriority.Background);
     }
 
@@ -214,8 +218,11 @@ public partial class MainWindow : Window
 
         // 托盘与 DLL 轨道
         ChkTray.IsChecked = _cfg.MinimizeToTray;
-        ChkFileLog.IsChecked = _cfg.WriteFileLog;
-        ChkDllLog.IsChecked = _cfg.DllLogEnabled;
+        // 日志开关由 -Debug 启动参数统一控制，复选框只作状态指示（不可勾选）
+        ChkFileLog.IsChecked = App.DebugMode;
+        ChkDllLog.IsChecked = App.DebugMode;
+        ChkFileLog.IsEnabled = false;
+        ChkDllLog.IsEnabled = false;
         // Track B 显示模式（v16 全自治驱动）
         foreach (System.Windows.Controls.ComboBoxItem item in CmbDirectDisplay.Items)
             if ((string)item.Tag == _cfg.DirectDisplayMode) { CmbDirectDisplay.SelectedItem = item; break; }
@@ -379,7 +386,7 @@ public partial class MainWindow : Window
                     {
                         Core.DllSwitcher.WriteDirectConfig(gd, _cfg.ListenPort,
                             _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix, _cfg.DirectOutgoingMode,
-                            dllLog: _cfg.DllLogEnabled,
+                            dllLog: App.DebugMode,
                             outFilter: _cfg.OutgoingFilterRules,
                             outOff: _cfg.DirectOutgoingOffChannels);
                         Log("已同步游戏目录 WoWTranslateDirect.json——游戏内 /reload 或重启游戏生效");
@@ -735,12 +742,12 @@ public partial class MainWindow : Window
         if (_llama == null) return;
         UptimeText.Text = _llama.Uptime.ToString(@"hh\:mm\:ss");
 
-        // llama 内存占用监控（每秒采样显示；每分钟落一行 CSV 供趋势分析）
+        // llama 内存占用监控（每秒采样显示；CSV 仅 -Debug 调试模式落盘）
         var mem = _llama.WorkingSetMB;
         LlamaPidText.Text = _llama.Pid is int p && _llama.State is LlamaState.Running or LlamaState.Starting
             ? (mem.HasValue ? $"PID {p} · {mem.Value:N0} MB" : $"PID {p}")
             : "";
-        if (++_memSampleTick >= 60)
+        if (App.DebugMode && ++_memSampleTick >= 60)
         {
             _memSampleTick = 0;
             if (mem.HasValue && _llama.Pid is int mp)
@@ -763,17 +770,18 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 按钮 IsEnabled 变化会迁移键盘焦点（WPF 顺链 BringIntoView 把左栏滚到底），
-    /// 统一把焦点收回到永不禁用的游戏目录输入框。
+    /// 需要把焦点收回固定位置；但游戏目录已设置时不落入该输入框（用户指定：
+    /// 仅未设置时才自动跳转），改为交给窗口本身承接焦点。
     /// </summary>
     private void KeepFocusStable()
     {
-        if (System.Windows.Input.Keyboard.FocusedElement is not System.Windows.Controls.Control c)
-        {
-            TxtGameDir.Focus();
-            return;
-        }
-        if (!c.IsEnabled || c is System.Windows.Controls.Button)
-            TxtGameDir.Focus();
+        if (System.Windows.Input.Keyboard.FocusedElement is System.Windows.Controls.Control c &&
+            c.IsEnabled && c is not System.Windows.Controls.Button)
+            return;   // 焦点在正常启用的非按钮控件上，不动
+        if (string.IsNullOrWhiteSpace(TxtGameDir.Text))
+            TxtGameDir.Focus();      // 未配置游戏目录：跳转到该输入框引导填写
+        else
+            System.Windows.Input.Keyboard.Focus(null);   // 已配置：清到窗口，不抢控件
     }
 
     private void OnLlamaStateChanged(LlamaState s)
@@ -963,10 +971,10 @@ public partial class MainWindow : Window
             {
                 Core.DllSwitcher.WriteDirectConfig(gameDir, _cfg.ListenPort,
                     _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix, _cfg.DirectOutgoingMode,
-                    dllLog: _cfg.DllLogEnabled,
+                    dllLog: App.DebugMode,
                     outFilter: _cfg.OutgoingFilterRules,
                     outOff: _cfg.DirectOutgoingOffChannels);
-                Log($"已更新游戏目录 WoWTranslateDirect.json（displayMode={_cfg.DirectDisplayMode}，outgoing={_cfg.DirectOutgoingMode}，log={_cfg.DllLogEnabled}，游戏内 /reload 生效）");
+                Log($"已更新游戏目录 WoWTranslateDirect.json（displayMode={_cfg.DirectDisplayMode}，outgoing={_cfg.DirectOutgoingMode}，log={App.DebugMode}，游戏内 /reload 生效）");
             }
         }
         catch (Exception ex)
@@ -1079,7 +1087,7 @@ public partial class MainWindow : Window
             var assets = System.IO.Path.Combine(AppContext.BaseDirectory, "assets", "direct-dll");
             var lines = Core.DllSwitcher.EnsureDeployed(gameDir, assets,
                 _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix, _cfg.DirectOutgoingMode,
-                listenPort: _cfg.ListenPort, dllLog: _cfg.DllLogEnabled,
+                listenPort: _cfg.ListenPort, dllLog: App.DebugMode,
                 outFilter: _cfg.OutgoingFilterRules, outOff: _cfg.DirectOutgoingOffChannels);
             foreach (var l in lines) Log(l);
             RefreshDllStatus();
@@ -1088,24 +1096,6 @@ public partial class MainWindow : Window
         {
             Log("自动部署失败：" + ex.Message);
         }
-    }
-
-    private void ChkDllLog_Changed(object sender, RoutedEventArgs e)
-    {
-        if (!IsLoaded) return;
-        _cfg.DllLogEnabled = ChkDllLog.IsChecked == true;
-        _cfg.Save();
-        SyncDirectConfigToGameDir();
-        Log($"DLL 日志 WoWTranslateDirect.log 已{(ChkDllLog.IsChecked == true ? "开启" : "关闭")}" +
-            (ChkDllLog.IsChecked == true ? "" : "；游戏内 /reload 生效"));
-    }
-
-    private void ChkFileLog_Changed(object sender, RoutedEventArgs e)
-    {
-        if (!IsLoaded) return;
-        _cfg.WriteFileLog = ChkFileLog.IsChecked == true;
-        _cfg.Save();
-        Log($"文件日志 proxy_traffic.log 已{(ChkFileLog.IsChecked == true ? "开启" : "关闭")}");
     }
 
     private void CmbDirectOutgoing_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)

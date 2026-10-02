@@ -336,7 +336,7 @@ public sealed class ProxyServer : IDisposable
         }
 
         // 落盘留证：DLL 实际发来的请求文本 + 原始报文前 120 字节 hex（诊断编码损坏用）
-        if (_cfg.WriteFileLog) WriteTrafficLog(channel, cleanText, body);
+        if (App.DebugMode) WriteTrafficLog(channel, cleanText, body);
 
         // ---- Filter → Glossary → Cache ----
         foreach (var stage in _stages)
@@ -365,7 +365,7 @@ public sealed class ProxyServer : IDisposable
 
         // ---- Provider（llama / OpenAI 兼容 / 谷歌免费，按模式与故障转移链）----
         var reply = await _providers.TranslateAsync(ctx, ct).ConfigureAwait(false);
-        if (_cfg.WriteFileLog)
+        if (App.DebugMode)
             WriteTrafficLog(channel, "[REPLY:" + (reply.Ok ? "OK" : "FAIL") + "] " + reply.Translated, null);
 
         string finalText;
