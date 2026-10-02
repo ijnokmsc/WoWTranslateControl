@@ -5,7 +5,26 @@
 -- 任何聊天 UI（EUI/巨龙UI/原生）都无法拦截或改道；事件参数即纯正文与发送者。
 -- （v28 过滤器、v29 OnEvent/AddMessage 钩子在该客户端+聊天插件组合下均不触发。）
 -- 就绪门禁：FrameXML 未加载完时静默返回，C++ 侧 500ms 后重试。
-if not WTC_DRIVER_LOADED and NUM_CHAT_WINDOWS and DEFAULT_CHAT_FRAME and ChatFrame_OnEvent and ChatFrame1 then
+if not (not WTC_DRIVER_LOADED and NUM_CHAT_WINDOWS and DEFAULT_CHAT_FRAME and ChatFrame_OnEvent and ChatFrame1) then
+  -- v39 门禁探针：只写全局变量（纯 Lua），由引擎在块返回后 getfield 裸读。
+  -- ⚠ 严禁在这里调 WoWTranslate_Diag：Grimfall 客户端校验嵌套 FrameScript_Execute
+  --   期间的 C 函数调用（ERROR #134 Invalid function pointer，v38 实测崩溃）。
+  WTC_GATE_INFO = "loaded=" .. tostring(WTC_DRIVER_LOADED ~= nil) ..
+    " ncw=" .. tostring(NUM_CHAT_WINDOWS) ..
+    " dcf=" .. tostring(DEFAULT_CHAT_FRAME ~= nil) ..
+    " cfoe=" .. tostring(ChatFrame_OnEvent ~= nil) ..
+    " cf1=" .. tostring(ChatFrame1 ~= nil)
+elseif WoWTranslate_Diag == nil or WoWTranslate_Translate == nil or WoWTranslate_Poll == nil then
+  -- v42 API 注册校验：登录期 Lua 状态多次切换，注册 C 函数的状态与脚本执行
+  -- （FrameScript_Execute 内部走 *globalLPtr）的状态可能错位，驱动会"活着但
+  -- API 为 nil"——过滤器照常注册并吞消息、每条聊天抛 attempt to call global
+  -- 'WoWTranslate_Diag' (a nil value)（Frostmourne 实测）。
+  -- 此处不置 WTC_DRIVER_LOADED、不注册过滤器；引擎读到未加载 → 重试，
+  -- 当前全局状态的 gettop 走切换分支重注册后干净重注入。
+  WTC_GATE_INFO = "api-missing diag=" .. tostring(WoWTranslate_Diag ~= nil) ..
+    " tr=" .. tostring(WoWTranslate_Translate ~= nil) ..
+    " poll=" .. tostring(WoWTranslate_Poll ~= nil)
+else
 WTC_DRIVER_LOADED = true
 
 local function WTC_MAIN()
@@ -25,6 +44,10 @@ local pending, counter = {}, 0
 local outPending, outCounter = {}, 0
 local origSend = SendChatMessage
 local dbg = { raw = 0, own = 0, ok = 0, terr = 0, to = 0, oto = 0, chatEvt = 0 }
+
+-- 断线熔断：网络类错误后冷却期内不捕获不压制，聊天原生显示（频道/ID 完整）
+local deadUntil = 0
+local BREAKER_COOLDOWN = 15
 
 -- UTF-8 文本的 CJK 检测（外发译文质检：翻译后的"英文"必须纯 ASCII 安全）
 local function HasCJKUtf8(t)
@@ -116,6 +139,16 @@ local function DisplayLine(text, r, g, b)
   end
 end
 
+-- 翻译失败/超时兜底：回显原文并重建头部（频道标签+玩家链接），不再只显正文
+local function EchoOriginal(p)
+  local line = ""
+  if p.chanLabel ~= "" then line = p.chanLabel .. " " end
+  if p.sender ~= "" then
+    line = line .. "|Hplayer:" .. p.sender .. "|h[" .. p.sender .. "]|h： "
+  end
+  DisplayLine(line .. p.text, 1, 0.4, 0.4)
+end
+
 -- ---- 捕获去重查询：只查不标（标记由 TryCapture 负责）----
 -- v33 修复：SeenMark 先标后查会自吞事件帧自己的捕获（说/团队零捕获根因）
 local seen = {}
@@ -180,12 +213,16 @@ end
 -- 中文判定（编码无关）：任一字节 >= 0x81 即含 CJK（GBK 双字节首位/UTF-8 首字节均为高位）
 -- ——事件参数是纯正文（无头污染），该判定不再误伤"中文 ID 玩家的英文消息"
 local TRANSLATE_MARK = "[译]"
+-- 外发英文标识：对方软件客户端收到 [TR] 行不应再翻（防双软件二次翻译）
+local OUTGOING_MARK = "[TR]"
 local function ShouldTranslate(event, msg, sender)
   local ch = EVENTS[event]
   if not ch or not msg or msg == "" then return nil end
+  if GetTime() < deadUntil then return nil end   -- 熔断冷却：放行原文
   local me = UnitName and UnitName("player")
   if me and me ~= "" and sender == me then return nil end
   if string.find(msg, TRANSLATE_MARK, 1, true) then return nil end   -- 已译标识防回环
+  if string.find(msg, OUTGOING_MARK, 1, true) then return nil end    -- 外发译文标识：已是英文译文
   if HasCJK(msg) then return nil end   -- 中文消息不送翻（双方都装软件时的重复根源）
   return ch
 end
@@ -197,38 +234,28 @@ local suppressCount = 0
 local function WTCSuppressFilter(chatFrame, event, msg, sender, ...)
   local ch = ShouldTranslate(event, msg, sender)
   if not ch then return false end
-  local r = TryCapture(ch, msg, sender, ChanLabel(ch, ...))
-  if r == "queued" then
-    -- 标记该条已被压制（译文回显时跳过判重的依据）
-    local snd = tostring(sender or "")
-    local newest, newestT
-    for _, p in pairs(pending) do
-      if p.sender == snd and not p.done and (newestT == nil or p.t > newestT) then
-
-        newest, newestT = p, p.t
-      end
+  TryCapture(ch, msg, sender, ChanLabel(ch, ...))
+  -- 仅 replace 模式压制原文；both 模式放行（原文照显，译文由轮询追加）
+  if displayMode ~= "replace" then return false end
+  -- queued 与 dup 统一处理：dup = 事件帧先入队（派发顺序竞争），条目已在
+  -- pending 里——匹配同发送者最新未完成条目标记压制。只处理 queued 会让
+  -- dup 时过滤器放行 → 原文漏网 + 译文追加 = 双行显示（小队/团队漏替根因）。
+  local snd = tostring(sender or "")
+  local newest, newestT
+  for _, p in pairs(pending) do
+    if p.sender == snd and not p.done and (newestT == nil or p.t > newestT) then
+      newest, newestT = p, p.t
     end
-    if newest then newest.suppressed = true end
-    suppressCount = suppressCount + 1
-    if suppressCount <= 3 then
-      WoWTranslate_Diag("WTC_FILTERCAP #" .. suppressCount .. " ch=" .. ch ..
-        " sender=" .. tostring(sender) .. " mode=" .. displayMode)
-    end
-    -- 仅 replace 模式压制原文；both 模式放行（原文照显，译文由轮询追加）
-    if displayMode == "replace" then
-      -- "dup"（事件帧先入队的派发顺序竞争）→ 匹配未完成的同源翻译并压制，
-      -- 否则原文漏网 + 译文追加 = 双行显示
-      local snd = tostring(sender or "")
-      local now = GetTime()
-      for _, p in pairs(pending) do
-        if not p.done and p.sender == snd and now - p.t < 5 then
-          p.suppressed = true
-          return true
-        end
-      end
-    end
-    return false
   end
+  if not newest then return false end   -- 无条目（风暴丢弃）→ 放行原文
+  newest.suppressed = true
+  suppressCount = suppressCount + 1
+  if suppressCount <= 3 then
+    WoWTranslate_Diag("WTC_FILTERCAP #" .. suppressCount .. " ch=" .. ch ..
+      " sender=" .. tostring(sender) .. " mode=" .. displayMode)
+  end
+  return true
+end
 
 for ev in pairs(EVENTS) do
   ChatFrame_AddMessageEventFilter(ev, WTCSuppressFilter)
@@ -282,6 +309,8 @@ for i = 1, 3 do
 end
 
 -- ---- 轮询帧：Poll 译文 + 显示 + 超时兜底 ----
+-- （MSVC 单个原始字符串字面量上限：此处拆分为两个相邻字面量拼接）
+
 local pollAcc = 0
 local pollFrame = CreateFrame("Frame")
 pollFrame:SetScript("OnUpdate", function(self, elapsed)
@@ -324,24 +353,28 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
         if dbg.terr <= 3 then
           WoWTranslate_Diag("WTC_TRANSERR id=" .. id .. " err=" .. string.sub(er, 1, 80))
         end
-        -- 失败回显原文（不加诊断前缀，保持聊天观感）
-        DisplayLine(p.text, 1, 0.4, 0.4)
+        -- 网络类错误（控制台未启动/端口拒绝）→ 打开熔断，冷却期内放行原文
+        if string.find(er, "network", 1, true) and GetTime() >= deadUntil then
+          deadUntil = GetTime() + BREAKER_COOLDOWN
+          WoWTranslate_Diag("WTC_BREAKER open (cooldown " .. BREAKER_COOLDOWN .. "s)")
+        end
+        -- 失败回显原文（重建头部，保持聊天观感）
+        EchoOriginal(p)
       else
         dbg.ok = dbg.ok + 1
         if dbg.ok <= 3 then
           WoWTranslate_Diag("WTC_TRANSOK id=" .. id)
         end
-        -- 中文回显去重：译文与归一化原文一致且原文未被压制（UI 已显示）
-        -- → 不重复显示（压制过的仍要显示，否则消息丢失）
+        -- 译文显示行：标识统一紧贴正文前方（[chanLabel] [sender]： [译] 译文）
         if tr ~= "" and (tr == otxt or tr == p.text) and not p.suppressed then
           -- skip
         else
-          local line = TRANSLATE_MARK
-          if p.chanLabel ~= "" then line = p.chanLabel .. " " .. line end
+          local line = ""
+          if p.chanLabel ~= "" then line = p.chanLabel .. " " end
           if p.sender ~= "" then
-            line = line .. " |Hplayer:" .. p.sender .. "|h[" .. p.sender .. "]|h： "
+            line = line .. "|Hplayer:" .. p.sender .. "|h[" .. p.sender .. "]|h： "
           end
-          line = line .. tr
+          line = line .. dispPrefix .. " " .. tr
           if displayMode == "both" then
             DisplayLine(dispPrefix .. line, p.r, p.g, p.b)
           else
@@ -362,7 +395,7 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
       if dbg.to <= 3 then
         WoWTranslate_Diag("WTC_TIMEOUT id=" .. mid)
       end
-      DisplayLine(p.text, 1, 0.4, 0.4)
+      EchoOriginal(p)
     end
   end
   -- 外发超时：replace 模式发原文兜底（both 已发过原文）
@@ -386,9 +419,41 @@ local OUT_TYPES = {
   OFFICER = true, RAID = true, RAID_WARNING = true, BATTLEGROUND = true,
   CHANNEL = true,
 }
+-- v41 发送消息过滤器：外发频道开关（outoff="WHISPER,CHANNEL"）——关闭的频道原样放行
+local OUT_OFF = {}
+for offch in string.gmatch(tostring(WTC_CFG.outoff or ""), "[^,%s]+") do
+  OUT_OFF[offch] = true
+end
+-- v41 免翻译前缀规则（outfilter 多行，每行一条）：消息以任一规则开头 → 原样放行。
+-- 另内置恒生效：首字符为半角句点或全角句号（. / 。，U+3002 = UTF-8 E3 80 82）
+-- ——私服命令即便后跟中文也不送翻，防止命令被翻译损坏。
+local OUT_RULES = {}
+for rule in string.gmatch(tostring(WTC_CFG.outfilter or ""), "[^\r\n]+") do
+  rule = string.match(rule, "^%s*(.-)%s*$")
+  if rule ~= "" then table.insert(OUT_RULES, rule) end
+end
+local function ShouldSkipOutgoing(msg)
+  local b1, b2, b3 = string.byte(msg, 1, 3)
+  if b1 == 0x2E or (b1 == 0xE3 and b2 == 0x80 and b3 == 0x82) then
+    return "dot"
+  end
+  for _, rule in ipairs(OUT_RULES) do
+    if string.sub(msg, 1, string.len(rule)) == rule then return "rule" end
+  end
+  return nil
+end
 SendChatMessage = function(msg, chatType, language, channel)
   if outgoingMode == "off" or not msg or msg == "" or not HasCJK(msg)
     or not chatType or not OUT_TYPES[chatType] then
+    return origSend(msg, chatType, language, channel)
+  end
+  if OUT_OFF[chatType] then
+    return origSend(msg, chatType, language, channel)
+  end
+  local skipWhy = ShouldSkipOutgoing(msg)
+  if skipWhy then
+    WoWTranslate_Diag("WTC_OUTSKIP why=" .. skipWhy ..
+      " type=" .. tostring(chatType) .. " msg=" .. string.sub(msg, 1, 50))
     return origSend(msg, chatType, language, channel)
   end
   outCounter = outCounter + 1
@@ -413,6 +478,14 @@ end
 local bannerShown = false
 local bannerFrame = CreateFrame("Frame")
 bannerFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+local function BannerPrint()
+  if bannerShown then return end
+  bannerShown = true
+  if DEFAULT_CHAT_FRAME then
+    DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.1.1 by ijnokmsc (driver v45, mode=" ..
+      displayMode .. ", outgoing=" .. outgoingMode .. ")")
+  end
+end
 bannerFrame:SetScript("OnEvent", function()
   if bannerShown then return end
   bannerShown = true
@@ -421,12 +494,21 @@ bannerFrame:SetScript("OnEvent", function()
     acc = acc + el
     if acc < 1 then return end
     self:SetScript("OnUpdate", nil)
-    if DEFAULT_CHAT_FRAME then
-      DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 2.1.2 by ijnokmsc (driver v31, mode=" ..
-        displayMode .. ", outgoing=" .. outgoingMode .. ")")
-    end
+    BannerPrint()
   end)
 end)
+-- v43 兜底：驱动加载晚于 PLAYER_ENTERING_WORLD 时（注入等浅栈窗口有秒级波动），
+-- PEW 事件已错过、横幅永远不显示 → 加载 12 秒后仍未显示则强制打印
+-- （此时加载屏必然已结束；正常路径 PEW+1s 先行，bannerShown 拦住重复）。
+do
+  local acc = 0
+  bannerFrame:SetScript("OnUpdate", function(self, el)
+    acc = acc + el
+    if acc < 12 then return end
+    self:SetScript("OnUpdate", nil)
+    BannerPrint()
+  end)
+end
 
 end  -- WTC_MAIN
 
