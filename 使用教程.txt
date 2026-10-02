@@ -1,5 +1,4 @@
- WoWTranslateControl 使用教程 (v3.0.0 · ijnokmsc)
- WoWTranslateControl 使用教程 (v3.0.0 · ijnokmsc)
+ WoWTranslateControl 使用教程 (v3.1.1 · ijnokmsc)
  WoW 3.3.5 客户端 聊天实时翻译（英文→中文 / 中文→英文外发）
 ==============================================================
 
@@ -12,7 +11,7 @@
 【二、文件说明】
   WoWTranslateControl.exe   主程序（.NET 运行时已内置，无需安装任何环境）
   assets\direct-dll\        游戏注入用 DLL（dinput8.dll + WoWTranslateDirect.dll）
-  assetspp.ico            程序图标
+  assets\app.ico            程序图标
   glossary.json             术语表（已内置 240+ 条 WoW 术语）
   llama.cpp\                llama.cpp 与模型存放目录（首次启动自动生成）
   settings.json             配置文件（首次启动自动生成）
@@ -50,10 +49,14 @@
        ※ EUI 用户注意：EUI 接管了聊天显示，"替换"暂不可用，
          表现为原文+译文都显示；巨龙UI/原生界面不受影响
      - 外发翻译（中文→英文）：关闭 | 只发英文 | 原文+英文都发
+     - 外发频道开关：说/喊/密语/队伍/公会/官员/团队/团队警告/战场/世界
+       十个频道独立勾选是否参与翻译，取消勾选的频道发言原样放行
+     - 外发免翻译前缀（每行一条）：消息以任一前缀开头则原样发送不翻译；
+       "." 和 "。" 开头的消息内置恒不翻译（私服命令带中文参数也不怕）
 
 【五、进入游戏】
   1. 聊天框出现：
-     [WTC] WoWTranslateDirect 3.0.0 by ijnokmsc (driver v36, ...)
+     [WTC] WoWTranslateDirect 3.1.1 by ijnokmsc (driver v45, ...)
      即部署成功（横幅在进入世界约 1 秒后出现）
   2. 英文聊天 → 自动显示中文译文（综合聊天框）
   3. 你发的中文 → 自动以英文发出（约 1-3 秒；超时 25 秒发原文兜底）
@@ -62,11 +65,12 @@
 【六、常用设置说明】
   - 按频道过滤（C0-C8）：不想翻译的频道（如世界频道）关掉对应勾选，
     即时生效
-  - 过滤规则 R0-R8（左栏最下方）：系统噪音过滤（战斗日志/拾取播报等），
-    默认全开即可
+  - 系统噪音过滤：战斗日志/拾取播报等由引擎内部自动拦截，无需配置
   - 术语表管理：词条 = 英文原文 → 中文译名，保存后自动生效
     （例：Al'ar=奥尔、LFM=求组，可持续补充提升译名一致性）
   - 响应缓存：相同原文直接复用译文，不重复调用模型；界面可「清空缓存」
+  - llama 内存阈值：工作集连续 60 秒超阈值（默认 4096 MB）自动重启回收；
+    崩溃后 5 秒自动拉起；也可点「重启 llama-server」手动重启
   - 实时流量：查看每条消息走了哪条规则/是否缓存命中
   - 外发等待时间：默认 25 秒，可在游戏目录 WoWTranslateDirect.json
     的 outTimeout 调整（游戏内 /reload 生效）
@@ -107,14 +111,22 @@
   Q：游戏目录 WoWTranslateDirect.json 改坏了？
   A：控制台里随便改动一个翻译选项再改回，即可重写。
 
+  Q：我发的中文（或译文）在某些公开频道不显示？
+  A：部分服务器对公开频道有内容过滤或限发策略（软件日志确认已发出）。
+     可把外发模式设为「只发英文」（英文/ASCII 一般可过）；公会/小队
+     等内部频道通常不受影响。
+
 【八、卸载】
-  1. 删除游戏目录的 dinput8.dll / WoWTranslateDirect.dll / dlls.txt /
-     WoWTranslateDirect.json（3.0 已无 GS 备用轨道；如游戏目录还有
-     老版 WoWTranslate335.dll，它已不被加载，可一并删除）
+  1. 游戏目录卸载：主窗口点「卸载 Direct DLL」一键完成（Wow.exe 运行中
+     拒绝执行）——删除 dinput8.dll / WoWTranslateDirect.dll / dlls.txt /
+     WoWTranslateDirect.json，并自动判归属还原你部署前原有的文件
+     （备份目录 wtc_backup\ 保留）；卸载后控制台不再自动重装，
+     点「重新部署 Direct DLL」随时恢复
+     ※ 老版 WoWTranslate335.dll 已不被加载，可一并手动删除
   2. 退出并删除本程序目录即可。设置/缓存/术语表都在程序目录内，无残留。
 
 --------------------------------------------------------------
- WoWTranslateControl v3.0.0 · by ijnokmsc · 本地运行
+ WoWTranslateControl v3.1.1 · by ijnokmsc · 本地运行
  （翻译由 llama.cpp 本地模型完成；选择 OpenAI/谷歌接口时聊天文本
    会发送给相应服务商）
 ==============================================================

@@ -33,6 +33,9 @@
     重启不足 5 分钟视为连续崩溃，暂停自动拉起待人工排查
   - 新增「重启 llama-server」手动按钮
 * 版本号 3.0.0 → 3.1.1（驱动标识 v40 → v45）
+* 建立公开 GitHub 仓库并首次发布 Release：
+  github.com/ijnokmsc/WoWTranslateControl（新增 README 项目说明，
+  使用教程同步更新至 3.1.1：外发过滤器/llama 内存监控/智能卸载）
 
 【修复】
 * 登录/进游戏偶发翻译失效与 Lua 报错（driver v41 → v45 逐层修复，
