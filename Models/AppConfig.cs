@@ -47,7 +47,21 @@ public sealed class AppConfig
     /// 所以必须由代理补上，否则模型不知道这是翻译任务。
     /// 实测有效：126 组玩家聊天中 81 组成功翻译。
     /// </summary>
+    /// <summary>
+    /// 接收方向默认提示词（任意语言 → 中文）。v50 起不再限定英语源：
+    /// 国际服世界频道常见西语/俄语/葡语招募等；中文指令对混元/转录系
+    /// 翻译模型更稳（英文指令会让 Hy-MT 偶发输出中文改写，见 Zh2En 注释）。
+    /// </summary>
     public const string DefaultSystemPrompt =
+        "你是魔兽世界游戏聊天翻译器。把下面的聊天消息翻译成简体中文，" +
+        "无论原文是哪种语言（英语/西班牙语/俄语/葡语等均可）。" +
+        "只输出译文，不要解释，不要加引号。" +
+        "组队/交易黑话缩写（LFM、WTS、pst 等）保留原样或用国服习惯说法；" +
+        "人名、数字、|H...|h...|h 链接、|c...|r 颜色标记与占位符原样保留。";
+
+    /// <summary>3.1.x 时代的旧默认提示词（仅英语源）——settings.json 里
+    /// 与其完全一致的未修改默认值会被静默升级为新默认。</summary>
+    public const string LegacySystemPrompt =
         "You are a World of Warcraft translator. Translate the given game chat " +
         "from English (or mixed EN/ZH) into Chinese. Output ONLY the Chinese " +
         "translation, no explanation, no surrounding quotes. Preserve WoW " +
@@ -61,7 +75,9 @@ public sealed class AppConfig
     /// （中文指令），英文指令会导致该模型偶发输出中文改写而非英文译文。
     /// </summary>
     public const string DefaultSystemPromptZh2En =
-        "把下面的文本翻译成英文，不要额外解释。";
+        "把下面的魔兽世界聊天消息翻译成英文，让英文玩家一看就懂：" +
+        "组队/交易黑话按英文服习惯（LFM、WTS、pst 等），语气保持口语化，" +
+        "只输出译文，不要额外解释，不要加引号。";
 
     /// <summary>
     /// 单次请求的 token 上限。DLL 不发 max_tokens，不设上限时模型可能一直生成到耗尽上下文。
@@ -233,7 +249,15 @@ public sealed class AppConfig
             {
                 var json = File.ReadAllText(ConfigPath);
                 var cfg = JsonSerializer.Deserialize<AppConfig>(json);
-                if (cfg != null) { cfg.MigrateLegacyProviders(json); cfg.EnsureDefaultProviders(); return cfg; }
+                if (cfg != null)
+                {
+                    cfg.MigrateLegacyProviders(json);
+                    cfg.EnsureDefaultProviders();
+                    // 旧版英语源默认提示词 → 多语言版（用户自定义过的不动）
+                    if (cfg.SystemPrompt == LegacySystemPrompt)
+                        cfg.SystemPrompt = DefaultSystemPrompt;
+                    return cfg;
+                }
             }
         }
         catch
