@@ -48,7 +48,6 @@ public partial class ProviderWindow : Window
             return;
         }
         TxtName.Text = p.Name;
-        SelectType(p.Type);
         TxtEndpoint.Text = p.Endpoint;
         TxtApiKey.Text = p.ApiKey;
         TxtModel.Text = p.Model;
@@ -57,34 +56,19 @@ public partial class ProviderWindow : Window
         UpdateFormVisibility();
     }
 
-    private void SelectType(string type)
-    {
-        foreach (ComboBoxItem item in CmbType.Items)
-            if ((string)item.Tag == type) { CmbType.SelectedItem = item; return; }
-        CmbType.SelectedIndex = 0;
-    }
-
-    private string SelectedType =>
-        CmbType.SelectedItem is ComboBoxItem item ? (string)item.Tag : "openai";
-
-    private void CmbType_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        UpdateFormVisibility();
-        // 切类型是编辑中状态：提示尚未保存，避免误以为已生效
-        if (Selected != null && IsLoaded)
-            TxtHint.Text = "类型已切换（未保存）——核对字段后点「保存修改」";
-    }
-
     private void UpdateFormVisibility()
     {
-        var google = SelectedType == "google";
+        // 类型由条目决定（谷歌免费/免费 API 为内置预设，自定义添加恒为 OpenAI 兼容），不可改
+        var google = Selected?.Type == "google";
+        TxtType.Text = google ? "谷歌免费翻译" : "OpenAI 兼容";
         PnlOpenAi.Visibility = google ? Visibility.Collapsed : Visibility.Visible;
         PnlGoogle.Visibility = google ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void BtnAdd_Click(object sender, RoutedEventArgs e)
     {
-        var entry = new ProviderEntry { Name = "新翻译服务", Type = "openai" };
+        // 自定义添加恒为 OpenAI 兼容；谷歌免费/免费 API 是内置预设，不提供手工创建
+        var entry = new ProviderEntry { Name = "新 OpenAI 兼容服务", Type = "openai" };
         _cfg.Providers.Add(entry);
         Saved = true;
         ReloadList();
@@ -104,12 +88,6 @@ public partial class ProviderWindow : Window
             TxtHint.Text = "免费 API 已在列表中（OpenAI 兼容类型，非谷歌翻译）";
             return;
         }
-        var entry = ProviderEntry.CreateFreeApi();
-        _cfg.Providers.Add(entry);
-        Saved = true;
-        ReloadList();
-        LstProviders.SelectedItem = entry;
-        TxtHint.Text = "免费 API 已添加（OpenAI 兼容类型）";
     }
 
     private void BtnDelete_Click(object sender, RoutedEventArgs e)
@@ -141,15 +119,13 @@ public partial class ProviderWindow : Window
             MessageBox.Show(this, "名称不能为空。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        var type = SelectedType;
-        if (type == "openai" && !TxtEndpoint.Text.Trim().StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        if (p.Type == "openai" && !TxtEndpoint.Text.Trim().StartsWith("http", StringComparison.OrdinalIgnoreCase))
         {
             MessageBox.Show(this, "接口地址必须是完整 URL（含 /v1/chat/completions）。",
                 "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         p.Name = name;
-        p.Type = type;
         p.Endpoint = TxtEndpoint.Text.Trim();
         p.ApiKey = TxtApiKey.Text.Trim();
         p.Model = TxtModel.Text.Trim();

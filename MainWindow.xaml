@@ -128,7 +128,7 @@
                                           SelectionChanged="CmbActiveProvider_SelectionChanged" />
                                 <Button x:Name="BtnManageProviders" Content="管理…" Margin="6,0,0,0"
                                         Padding="8,3" Click="BtnManageProviders_Click"
-                                        ToolTip="添加/编辑/删除翻译服务（OpenAI 兼容 / 谷歌免费）" />
+                                        ToolTip="添加/编辑/删除自己的 OpenAI 兼容翻译服务（谷歌免费与 B站免费 API 已内置）" />
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                 <TextBlock Text="llama 模型：" VerticalAlignment="Center" />
@@ -404,7 +404,7 @@
                             <TextBlock Text="翻译服务（Provider）" Style="{StaticResource CardTitle}" />
                             <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,6"
                                        TextWrapping="Wrap"
-                                       Text="插件永远只看到本地端点，切换翻译服务对游戏侧透明。在「服务控制」顶部选择当前服务；点「管理…」添加/编辑服务（OpenAI 兼容 / 谷歌免费 / B站免费 API 一键预设）。响应缓存跨服务共享，切换不清空。" />
+                                       Text="插件永远只看到本地端点，切换翻译服务对游戏侧透明。在「服务控制」顶部选择当前服务；谷歌免费与 B站免费 API 已内置，点「管理…」添加/编辑自己的 OpenAI 兼容服务。响应缓存跨服务共享，切换不清空。" />
 
                             <TextBlock Text="系统提示词（送模型的翻译指令，随 settings.json 本地保存）"
                                        Style="{StaticResource Dim}" Margin="0,10,0,2" />

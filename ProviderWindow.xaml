@@ -21,11 +21,9 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
             <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
-                <TextBlock Text="已添加的服务（选中后在服务控制下拉里生效）：" VerticalAlignment="Center" />
-                <Button x:Name="BtnAddFreeApi" Content="添加免费 API（B站官方）" Margin="10,0,0,0"
-                        Padding="8,3" Click="BtnAddFreeApi_Click"
-                        ToolTip="一键添加 bilibili Index-Translate-35B-A3B 免费翻译接口（OpenAI 兼容）" />
-                <Button x:Name="BtnAdd" Content="添加自定义…" Margin="6,0,0,0"
+                <TextBlock Text="谷歌免费与 B站免费 API 已内置；这里添加你自己的 OpenAI 兼容服务："
+                           VerticalAlignment="Center" />
+                <Button x:Name="BtnAdd" Content="添加 OpenAI 兼容服务…" Margin="10,0,0,0"
                         Padding="8,3" Click="BtnAdd_Click" />
                 <Button x:Name="BtnDelete" Content="删除选中" Margin="6,0,0,0"
                         Padding="8,3" Click="BtnDelete_Click" />
@@ -75,11 +73,8 @@
                     <TextBlock Text="名称：" VerticalAlignment="Center" />
                     <TextBox x:Name="TxtName" Width="230" />
                     <TextBlock Text="   类型：" VerticalAlignment="Center" />
-                    <ComboBox x:Name="CmbType" Width="150"
-                              SelectionChanged="CmbType_SelectionChanged">
-                        <ComboBoxItem Content="OpenAI 兼容" Tag="openai" />
-                        <ComboBoxItem Content="谷歌免费翻译" Tag="google" />
-                    </ComboBox>
+                    <TextBlock x:Name="TxtType" VerticalAlignment="Center"
+                               Foreground="#FF7FB2E5" FontWeight="Bold" Text="OpenAI 兼容" />
                 </StackPanel>
                 <StackPanel x:Name="PnlOpenAi" Margin="0,8,0,0">
                     <TextBlock Text="接口地址（完整 URL，含 /v1/chat/completions）：" Style="{StaticResource Dim}" />
