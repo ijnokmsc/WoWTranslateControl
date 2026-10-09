@@ -233,14 +233,41 @@ public sealed class AppConfig
             {
                 var json = File.ReadAllText(ConfigPath);
                 var cfg = JsonSerializer.Deserialize<AppConfig>(json);
-                if (cfg != null) { cfg.MigrateLegacyProviders(json); return cfg; }
+                if (cfg != null) { cfg.MigrateLegacyProviders(json); cfg.EnsureDefaultProviders(); return cfg; }
             }
         }
         catch
         {
             // 配置损坏时回落到默认值，不能让程序起不来
         }
-        return new AppConfig();
+        var fresh = new AppConfig();
+        fresh.EnsureDefaultProviders();
+        return fresh;
+    }
+
+    /// <summary>
+    /// 免费服务出厂内置（用户要求：谷歌免费直接添加好，用户只需添加自己的
+    /// OpenAI 兼容服务）。缺失即补回，误删重启自动恢复；免费 API 条目若被
+    /// 改坏（如类型被误存成 google）自动修复为预设值。
+    /// </summary>
+    private void EnsureDefaultProviders()
+    {
+        // 修复：名字是免费 API 预设但类型/字段被改坏的条目 → 还原预设（保留 Id）
+        foreach (var p in Providers.Where(p => p.Name == ProviderEntry.FreeApiName &&
+                                               (p.Type != "openai" ||
+                                                !string.Equals(p.Endpoint, ProviderEntry.FreeApiEndpoint, StringComparison.OrdinalIgnoreCase))))
+        {
+            var preset = ProviderEntry.CreateFreeApi();
+            p.Type = preset.Type;
+            p.Endpoint = preset.Endpoint;
+            p.ApiKey = preset.ApiKey;
+            p.Model = preset.Model;
+        }
+        if (!Providers.Any(p => p.Type == "google"))
+            Providers.Add(new ProviderEntry { Name = "谷歌免费翻译", Type = "google" });
+        if (!Providers.Any(p => string.Equals(p.Endpoint, ProviderEntry.FreeApiEndpoint,
+                StringComparison.OrdinalIgnoreCase)))
+            Providers.Add(ProviderEntry.CreateFreeApi());
     }
 
     /// <summary>

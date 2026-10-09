@@ -34,7 +34,7 @@ public partial class SetupWizardWindow : Window
         };
         Loaded += async (_, _) => await InitializeAsync().ConfigureAwait(false);
         // 默认选本地 AI；未装 llama.cpp 的新用户推荐先试免费 API（免下载即可体验）
-        if (!File.Exists(Path.Combine(_cfg.LlamaDir, "llama-server.exe")) && _cfg.Providers.Count == 0)
+        if (!File.Exists(Path.Combine(_cfg.LlamaDir, "llama-server.exe")))
             RbSvcFreeApi.IsChecked = true;
         else
             RbSvcLocal.IsChecked = true;
