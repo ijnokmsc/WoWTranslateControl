@@ -34,7 +34,7 @@ WoW 3.3.5 客户端聊天实时翻译控制台 —— 纯本地运行（llama.cp
 
 1. 从 [Releases](https://github.com/ijnokmsc/WoWTranslateControl/releases) 下载 zip 解压，运行 `WoWTranslateControl.exe`
    （首次启动或刚更新后，杀软扫描 165MB 单文件可能等待十几秒；网络下载的文件请先右键 → 属性 → 解除锁定）
-2. 点「环境检测与下载向导」→ 选择翻译服务：想先试试就选「免费 API」（免下载）；选「本地 AI」则继续下载 llama.cpp 与翻译模型 → 点「应用此模型」
+2. 点「环境检测与下载向导」→ 下载 llama.cpp 与翻译模型 → 点「应用此模型」（想先免下载体验：主窗口「服务控制」下拉直接选内置的「Index-Translate 免费 API」）
 3. 点「一键启动全部」（8080 = 过滤代理，8081 = llama-server；端口占用自动顺延）
 4. **完全退出游戏**，主窗口「游戏目录与部署」填入客户端根目录 → 自动部署 DLL（首次部署自动备份原文件到 `wtc_backup\`）
 5. 进游戏，聊天框出现 `[WTC] WoWTranslateDirect 3.1.1 by ijnokmsc (driver v45, ...)` 横幅即部署成功

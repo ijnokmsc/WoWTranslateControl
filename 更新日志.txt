@@ -10,8 +10,6 @@
   谷歌免费翻译与 B站免费 API（Index-Translate-35B-A3B，免下载免显卡，
   聊天文本将发送至 B 站服务器）**出厂内置**，删除后下次启动自动补回；
   用户通常只需添加自己的 OpenAI 兼容服务
-* 首次启动向导新增「翻译服务选择」步骤：本地 AI / 免费 API / 自带 KEY
-  三选一；选免费 API 可跳过 llama.cpp 与模型下载
 * llama 模型切换：服务控制新增模型下拉（列出 llama 目录 .gguf），
   llama-server 运行中会自动重启生效
 * 向导模型清单加入 Index-Translate 2B / 9B 翻译专模型（B站 Qwen3.5 架构，

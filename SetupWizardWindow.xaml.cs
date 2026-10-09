@@ -33,11 +33,6 @@ public partial class SetupWizardWindow : Window
             }
         };
         Loaded += async (_, _) => await InitializeAsync().ConfigureAwait(false);
-        // 默认选本地 AI；未装 llama.cpp 的新用户推荐先试免费 API（免下载即可体验）
-        if (!File.Exists(Path.Combine(_cfg.LlamaDir, "llama-server.exe")))
-            RbSvcFreeApi.IsChecked = true;
-        else
-            RbSvcLocal.IsChecked = true;
     }
 
     private async Task InitializeAsync()
@@ -104,53 +99,6 @@ public partial class SetupWizardWindow : Window
             TxtBuildNote.Text = $"共 {_builds.Count} 个可用构建。推荐 {(_recommendation!.LlamaAssetContains.Contains("cuda") ? "CUDA" : "CPU")} 版" +
                                 "；CUDA 版还需下载 cudart 运行库一并解压。下载慢也可手动下载 zip 放入 llama 目录，重新点「刷新」即可识别。";
         });
-    }
-
-    // ==================== 翻译服务选择 ====================
-
-    private void Svc_Changed(object sender, RoutedEventArgs e) => UpdateSvcSections();
-
-    private void UpdateSvcSections()
-    {
-        bool local = RbSvcLocal.IsChecked == true;
-        // 免费网络访问在 InitializeAsync 前也可能触发 Checked——控件可能尚未就绪
-        if (CardBuild == null || CardModel == null) return;
-        CardBuild.IsEnabled = local;
-        CardModel.IsEnabled = local;
-        TxtSvcNote.Text = RbSvcFreeApi.IsChecked == true
-            ? "应用后无需下载任何模型，主窗口点「启动过滤代理」即可翻译。"
-            : RbSvcByo.IsChecked == true
-                ? "应用后请到主窗口「服务控制 → 管理…」添加你的服务并选中。"
-                : "按下方步骤下载 llama.cpp 与模型。";
-    }
-
-    private void BtnApplyService_Click(object sender, RoutedEventArgs e)
-    {
-        if (RbSvcFreeApi.IsChecked == true)
-        {
-            var entry = _cfg.Providers.FirstOrDefault(p =>
-                string.Equals(p.Endpoint, ProviderEntry.FreeApiEndpoint, StringComparison.OrdinalIgnoreCase))
-                ?? ProviderEntry.CreateFreeApi();
-            if (!_cfg.Providers.Contains(entry)) _cfg.Providers.Add(entry);
-            _cfg.ActiveProviderId = entry.Id;
-            _cfg.Save();
-            Log($"已启用免费 API：{entry.Name}（模型 {entry.Model}）");
-            Log("主窗口点「启动过滤代理」即可翻译；llama-server 无需启动。聊天文本将发送至 B 站服务器。");
-            TxtStatus.Text = "免费 API 已启用";
-        }
-        else if (RbSvcByo.IsChecked == true)
-        {
-            _cfg.Save();
-            Log("请在主窗口「服务控制 → 管理…」添加你的 API（支持一键添加免费 API 预设），添加后在下拉列表选中生效。");
-            TxtStatus.Text = "请在主窗口添加自带 KEY 服务";
-        }
-        else
-        {
-            _cfg.ActiveProviderId = Core.Providers.ProviderManager.LocalId;
-            _cfg.Save();
-            Log("已选择本地 AI：按下方步骤下载 llama.cpp 与模型，「应用此模型」后点「启动 llama-server」。");
-            TxtStatus.Text = "本地 AI 已选定";
-        }
     }
 
     private void Log(string msg)
