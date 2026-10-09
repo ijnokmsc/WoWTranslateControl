@@ -11,12 +11,39 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- 硬件概况 -->
+        <!-- 翻译服务选择 -->
         <Border Grid.Row="0" Background="{StaticResource PanelBrush}" CornerRadius="6"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                Padding="12" Margin="0,0,0,10">
+            <StackPanel>
+                <TextBlock Text="翻译服务（首次使用请先选择）" Style="{StaticResource CardTitle}" />
+                <RadioButton x:Name="RbSvcLocal" GroupName="svc" Margin="0,4,0,0"
+                             Content="本地 AI——下载 llama.cpp 与本地模型，全程离线（默认）"
+                             Checked="Svc_Changed" Unchecked="Svc_Changed" />
+                <RadioButton x:Name="RbSvcFreeApi" GroupName="svc" Margin="0,2,0,0"
+                             Content="免费 API——B站官方 Index-Translate-35B-A3B 翻译专模型，免下载免显卡（聊天文本将发送至 B 站服务器）"
+                             Checked="Svc_Changed" Unchecked="Svc_Changed" />
+                <RadioButton x:Name="RbSvcByo" GroupName="svc" Margin="0,2,0,0"
+                             Content="自带 KEY——已有 OpenAI 兼容翻译 API，稍后在主窗口「服务控制 → 管理…」配置"
+                             Checked="Svc_Changed" Unchecked="Svc_Changed" />
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                    <Button x:Name="BtnApplyService" Content="应用翻译服务选择"
+                            Style="{StaticResource PrimaryBtn}" Padding="10,4"
+                            Click="BtnApplyService_Click" />
+                    <TextBlock x:Name="TxtSvcNote" Margin="8,0,0,0" VerticalAlignment="Center"
+                               Style="{StaticResource Dim}" TextWrapping="Wrap"
+                               Text="按下方步骤下载 llama.cpp 与模型。" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- 硬件概况 -->
+        <Border Grid.Row="1" Background="{StaticResource PanelBrush}" CornerRadius="6"
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
                 Padding="12" Margin="0,0,0,10">
             <StackPanel>
@@ -30,7 +57,7 @@
         </Border>
 
         <!-- llama.cpp -->
-        <Border Grid.Row="1" Background="{StaticResource PanelBrush}" CornerRadius="6"
+        <Border Grid.Row="2" x:Name="CardBuild" Background="{StaticResource PanelBrush}" CornerRadius="6"
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
                 Padding="12" Margin="0,0,0,10">
             <StackPanel>
@@ -57,7 +84,7 @@
         </Border>
 
         <!-- 模型 -->
-        <Border Grid.Row="2" Background="{StaticResource PanelBrush}" CornerRadius="6"
+        <Border Grid.Row="3" x:Name="CardModel" Background="{StaticResource PanelBrush}" CornerRadius="6"
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
                 Padding="12" Margin="0,0,0,10">
             <StackPanel>
@@ -81,7 +108,7 @@
         </Border>
 
         <!-- 进度与日志 -->
-        <Border Grid.Row="3" Background="{StaticResource PanelBrush}" CornerRadius="6"
+        <Border Grid.Row="4" Background="{StaticResource PanelBrush}" CornerRadius="6"
                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
                 Padding="12">
             <Grid>
@@ -102,7 +129,7 @@
             </Grid>
         </Border>
 
-        <TextBlock Grid.Row="4" x:Name="TxtStatus" Margin="0,8,0,0"
+        <TextBlock Grid.Row="5" x:Name="TxtStatus" Margin="0,8,0,0"
                    Style="{StaticResource Dim}" Text="就绪" />
     </Grid>
 </Window>

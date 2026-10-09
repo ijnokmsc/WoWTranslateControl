@@ -19,7 +19,13 @@ public sealed class OpenAiCompatProvider : ITranslationProvider
     public const string ProviderId = "openai-compat";
 
     private readonly AppConfig _cfg;
-    public OpenAiCompatProvider(AppConfig cfg) => _cfg = cfg;
+    private readonly ProviderEntry _entry;
+
+    public OpenAiCompatProvider(AppConfig cfg, ProviderEntry entry)
+    {
+        _cfg = cfg;
+        _entry = entry;
+    }
 
     public string Id => ProviderId;
 
@@ -30,12 +36,12 @@ public sealed class OpenAiCompatProvider : ITranslationProvider
             var body = BuildRequest(ctx);
             using var content = new ByteArrayContent(body);
             content.Headers.ContentType = new("application/json");
-            using var req = new HttpRequestMessage(HttpMethod.Post, _cfg.OpenAiEndpoint)
+            using var req = new HttpRequestMessage(HttpMethod.Post, _entry.Endpoint)
             {
                 Content = content
             };
-            if (!string.IsNullOrEmpty(_cfg.OpenAiApiKey))
-                req.Headers.Authorization = new("Bearer", _cfg.OpenAiApiKey);
+            if (!string.IsNullOrEmpty(_entry.ApiKey))
+                req.Headers.Authorization = new("Bearer", _entry.ApiKey);
 
             using var resp = await ProxyServer.SharedHttp
                 .SendAsync(req, _cfg.UpstreamTimeoutSec, ct).ConfigureAwait(false);
@@ -67,8 +73,7 @@ public sealed class OpenAiCompatProvider : ITranslationProvider
         using (var w = new Utf8JsonWriter(ms))
         {
             w.WriteStartObject();
-            w.WriteString("model", string.IsNullOrWhiteSpace(_cfg.OpenAiModel)
-                ? "gpt-4.1-mini" : _cfg.OpenAiModel);
+            w.WriteString("model", _entry.Model);
             w.WritePropertyName("messages");
             w.WriteStartArray();
             w.WriteStartObject();

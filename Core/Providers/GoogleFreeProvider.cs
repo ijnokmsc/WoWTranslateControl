@@ -19,7 +19,13 @@ public sealed class GoogleFreeProvider : ITranslationProvider
     public const string ProviderId = "google-free";
 
     private readonly AppConfig _cfg;
-    public GoogleFreeProvider(AppConfig cfg) => _cfg = cfg;
+    private readonly ProviderEntry _entry;
+
+    public GoogleFreeProvider(AppConfig cfg, ProviderEntry entry)
+    {
+        _cfg = cfg;
+        _entry = entry;
+    }
 
     public string Id => ProviderId;
 
@@ -29,8 +35,8 @@ public sealed class GoogleFreeProvider : ITranslationProvider
         {
             var url = "https://translate.googleapis.com/translate_a/single" +
                       "?client=gtx&dt=t" +
-                      $"&sl={Uri.EscapeDataString(ctx.SourceLang ?? _cfg.GoogleSl)}" +
-                      $"&tl={Uri.EscapeDataString(ctx.TargetLang ?? _cfg.GoogleTl)}" +
+                      $"&sl={Uri.EscapeDataString(ctx.SourceLang ?? _entry.GoogleSl)}" +
+                      $"&tl={Uri.EscapeDataString(ctx.TargetLang ?? _entry.GoogleTl)}" +
                       $"&q={Uri.EscapeDataString(ctx.Text)}";
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
             req.Headers.UserAgent.ParseAdd("WoWTranslateControl/2.0");

@@ -138,18 +138,12 @@ public sealed class AppConfig
     /// <summary>C0 未标记（旧版 Lua 未打频道标签，或外发翻译请求）。</summary>
     public bool ChannelUntagged { get; set; } = true;
 
-    // ---------- 翻译服务（Provider） ----------
-    /// <summary>Provider 模式：local=本地 llama | openai=OpenAI 兼容 | google=谷歌免费 | auto=故障转移链 llama→openai→google。</summary>
-    public string ProviderMode { get; set; } = "local";
+    // ---------- 翻译服务（Provider，v50 添加模式） ----------
+    /// <summary>当前生效服务："local" = 本地 llama，或 Providers 中某条目的 Id。</summary>
+    public string ActiveProviderId { get; set; } = "local";
 
-    /// <summary>OpenAI 兼容端点完整 URL（含 /v1/chat/completions）。</summary>
-    public string OpenAiEndpoint { get; set; } = "https://api.openai.com/v1/chat/completions";
-    public string OpenAiApiKey { get; set; } = "";
-    public string OpenAiModel { get; set; } = "gpt-4.1-mini";
-
-    /// <summary>谷歌免费翻译源/目标语言（client=gtx 公开端点，无需密钥）。</summary>
-    public string GoogleSl { get; set; } = "auto";
-    public string GoogleTl { get; set; } = "zh-CN";
+    /// <summary>已添加的远程翻译服务列表（主窗口「服务控制 → 管理…」维护）。</summary>
+    public List<ProviderEntry> Providers { get; set; } = new();
 
     // ---------- 游戏目录与部署 ----------
     /// <summary>游戏客户端根目录（含 Wow.exe / Interface / WTF）。</summary>
@@ -239,7 +233,7 @@ public sealed class AppConfig
             {
                 var json = File.ReadAllText(ConfigPath);
                 var cfg = JsonSerializer.Deserialize<AppConfig>(json);
-                if (cfg != null) return cfg;
+                if (cfg != null) { cfg.MigrateLegacyProviders(json); return cfg; }
             }
         }
         catch
@@ -247,6 +241,56 @@ public sealed class AppConfig
             // 配置损坏时回落到默认值，不能让程序起不来
         }
         return new AppConfig();
+    }
+
+    /// <summary>
+    /// 3.1.x 及以前的单服务字段（ProviderMode / OpenAi* / Google*）迁移为 Providers 列表。
+    /// 仅在列表为空时执行一次；旧 JSON 键由 System.Text.Json 自动忽略，迁移后落盘即消失。
+    /// </summary>
+    private void MigrateLegacyProviders(string legacyJson)
+    {
+        if (Providers.Count > 0) return;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(legacyJson);
+            var root = doc.RootElement;
+            string Get(string name) =>
+                root.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String
+                    ? v.GetString() ?? "" : "";
+            var mode = Get("ProviderMode");
+            if (mode is "openai" or "auto")
+            {
+                var ep = new ProviderEntry
+                {
+                    Name = "OpenAI 兼容",
+                    Type = "openai",
+                    Endpoint = Get("OpenAiEndpoint"),
+                    ApiKey = Get("OpenAiApiKey"),
+                    Model = Get("OpenAiModel"),
+                };
+                if (ep.Endpoint.Contains("index-translate.bilibili.com", StringComparison.OrdinalIgnoreCase))
+                    ep.Name = ProviderEntry.FreeApiName;
+                Providers.Add(ep);
+                // auto（故障转移链）已随 v50 移除：链头是 llama，落回本地；条目保留供手动切换
+                if (mode == "openai") ActiveProviderId = ep.Id;
+            }
+            else if (mode == "google")
+            {
+                var g = new ProviderEntry
+                {
+                    Name = "谷歌免费翻译",
+                    Type = "google",
+                    GoogleSl = Get("GoogleSl"),
+                    GoogleTl = Get("GoogleTl"),
+                };
+                Providers.Add(g);
+                ActiveProviderId = g.Id;
+            }
+        }
+        catch
+        {
+            // 旧配置损坏时按无远程服务启动
+        }
     }
 
     public void Save()

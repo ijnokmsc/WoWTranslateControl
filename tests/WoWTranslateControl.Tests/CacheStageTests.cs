@@ -25,7 +25,7 @@ public class CacheStageTests
     public async Task 术语表版本变化_缓存key随之变化()
     {
         var glossary = NewGlossary();
-        var cache = new CacheStage(Cfg(), glossary, TempPath(), "llama-local");
+        var cache = new CacheStage(Cfg(), glossary, TempPath());
 
         var ctx1 = new TranslationContext("hello world", Array.Empty<byte>(), Cfg());
         await cache.ProcessAsync(ctx1, default);
@@ -44,7 +44,7 @@ public class CacheStageTests
     public async Task Put之后_同key命中()
     {
         var glossary = NewGlossary();
-        var cache = new CacheStage(Cfg(), glossary, TempPath(), "llama-local");
+        var cache = new CacheStage(Cfg(), glossary, TempPath());
 
         var ctx = new TranslationContext("lf tank", Array.Empty<byte>(), Cfg());
         var miss = await cache.ProcessAsync(ctx, default);
@@ -66,14 +66,14 @@ public class CacheStageTests
         var glossary = NewGlossary();
         var cfg = Cfg();
 
-        var cache1 = new CacheStage(cfg, glossary, path, "llama-local");
+        var cache1 = new CacheStage(cfg, glossary, path);
         var ctx = new TranslationContext("hello", Array.Empty<byte>(), cfg);
         await cache1.ProcessAsync(ctx, default);
         cache1.Put(ctx, "你好");
         cache1.SaveNow();
         cache1.Dispose();
 
-        var cache2 = new CacheStage(cfg, glossary, path, "llama-local");
+        var cache2 = new CacheStage(cfg, glossary, path);
         var ctx2 = new TranslationContext("hello", Array.Empty<byte>(), cfg);
         var hit = await cache2.ProcessAsync(ctx2, default);
         Assert.NotNull(hit);
@@ -86,7 +86,7 @@ public class CacheStageTests
         var glossary = NewGlossary();
         var cfg = Cfg();
         cfg.CacheEnabled = false;
-        var cache = new CacheStage(cfg, glossary, TempPath(), "llama-local");
+        var cache = new CacheStage(cfg, glossary, TempPath());
 
         var ctx = new TranslationContext("hello", Array.Empty<byte>(), cfg);
         cache.Put(ctx, "你好");
@@ -108,7 +108,7 @@ public class CacheStageTests
     public async Task 命中达到阈值_晋升热层()
     {
         var glossary = NewGlossary();
-        var cache = new CacheStage(Cfg(), glossary, TempPath(), "llama-local");
+        var cache = new CacheStage(Cfg(), glossary, TempPath());
         await FillAndHitAsync(cache, Cfg(), "up grull", "升级了");
 
         Assert.Equal(0, cache.HotCount);
@@ -127,7 +127,7 @@ public class CacheStageTests
     public async Task 长度淘汰_热层幸存()
     {
         var glossary = NewGlossary();
-        var cache = new CacheStage(Cfg(), glossary, TempPath(), "llama-local") { WarmCapacityChars = 50 };
+        var cache = new CacheStage(Cfg(), glossary, TempPath()) { WarmCapacityChars = 50 };
 
         // 先造一个热条目
         await FillAndHitAsync(cache, Cfg(), "hot phrase", "热短语");
@@ -158,7 +158,7 @@ public class CacheStageTests
         var glossary = NewGlossary();
         var cfg = Cfg();
 
-        var cache1 = new CacheStage(cfg, glossary, path, "llama-local");
+        var cache1 = new CacheStage(cfg, glossary, path);
         await FillAndHitAsync(cache1, cfg, "repeat me", "重复我");
         // 2 次额外命中（未 Put）→ hits=3 → 热层
         for (var i = 0; i < 2; i++)
@@ -166,7 +166,7 @@ public class CacheStageTests
         cache1.SaveNow();
         cache1.Dispose();
 
-        var cache2 = new CacheStage(cfg, glossary, path, "llama-local");
+        var cache2 = new CacheStage(cfg, glossary, path);
         Assert.Equal(1, cache2.HotCount);   // 热层跨重启保留
         var hit = await cache2.ProcessAsync(new TranslationContext("repeat me", Array.Empty<byte>(), cfg), default);
         Assert.NotNull(hit);
@@ -205,7 +205,7 @@ public class OutgoingRoutingTests
         var glossary = new GlossaryStore(Path.Combine(
             Path.GetTempPath(), "wtc-tests", Guid.NewGuid().ToString("N"), "glossary.json"));
         var cache = new CacheStage(Cfg(), glossary, Path.Combine(
-            Path.GetTempPath(), "wtc-tests", Guid.NewGuid().ToString("N"), "cache.json"), "llama-local");
+            Path.GetTempPath(), "wtc-tests", Guid.NewGuid().ToString("N"), "cache.json"));
 
         var inc = new TranslationContext("测试", Array.Empty<byte>(), Cfg());
         await cache.ProcessAsync(inc, default);

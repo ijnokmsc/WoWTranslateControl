@@ -76,8 +76,7 @@ public sealed class ProxyServer : IDisposable
         _glossary = glossary ?? GlossaryStore.Load(
             Path.Combine(AppContext.BaseDirectory, "glossary.json"));
         _cacheStage = new CacheStage(cfg, _glossary,
-            Path.Combine(AppContext.BaseDirectory, "cache.json"),
-            new ProviderManager(cfg).PrimaryId);
+            Path.Combine(AppContext.BaseDirectory, "cache.json"));
         _providers = new ProviderManager(cfg);
         _providers.OnLog += m => OnLog?.Invoke(m);
         _stages = new IMessageStage[]

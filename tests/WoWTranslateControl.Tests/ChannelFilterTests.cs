@@ -129,13 +129,30 @@ public class ChannelFilterTests
     // ---- Provider 链 ----
 
     [Fact]
-    public void ProviderChainByMode()
+    public void ProviderActiveSelection()
     {
-        Assert.Equal(new[] { "llama-local" }, WoWTranslateControl.Core.Providers.ProviderManager.BuildChain("local"));
-        Assert.Equal(new[] { "openai-compat" }, WoWTranslateControl.Core.Providers.ProviderManager.BuildChain("openai"));
-        Assert.Equal(new[] { "google-free" }, WoWTranslateControl.Core.Providers.ProviderManager.BuildChain("google"));
-        Assert.Equal(new[] { "llama-local", "openai-compat", "google-free" },
-            WoWTranslateControl.Core.Providers.ProviderManager.BuildChain("auto"));
-        Assert.Equal(new[] { "llama-local" }, WoWTranslateControl.Core.Providers.ProviderManager.BuildChain("bogus"));
+        // v50 添加模式：ActiveProviderId 指向唯一生效服务；配置失效回落本地
+        var cfg = new WoWTranslateControl.Models.AppConfig();
+        var mgr = new WoWTranslateControl.Core.Providers.ProviderManager(cfg);
+        Assert.Equal("llama-local", mgr.PrimaryId);
+        Assert.True(mgr.NeedsLlama);
+
+        var ep = new WoWTranslateControl.Models.ProviderEntry { Name = "t", Type = "openai" };
+        cfg.Providers.Add(ep);
+        cfg.ActiveProviderId = ep.Id;
+        mgr = new WoWTranslateControl.Core.Providers.ProviderManager(cfg);
+        Assert.Equal("openai-compat", mgr.PrimaryId);
+        Assert.False(mgr.NeedsLlama);
+        Assert.Equal("t（OpenAI 兼容）", mgr.ActiveDisplayName);
+
+        var g = new WoWTranslateControl.Models.ProviderEntry { Name = "g", Type = "google" };
+        cfg.Providers.Add(g);
+        cfg.ActiveProviderId = g.Id;
+        Assert.Equal("google-free", new WoWTranslateControl.Core.Providers.ProviderManager(cfg).PrimaryId);
+
+        cfg.ActiveProviderId = "bogus-id";
+        var mgr2 = new WoWTranslateControl.Core.Providers.ProviderManager(cfg);
+        Assert.Equal("llama-local", mgr2.PrimaryId);
+        Assert.True(mgr2.NeedsLlama);   // 条目被删 → 回落本地 llama
     }
 }

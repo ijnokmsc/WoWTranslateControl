@@ -121,6 +121,22 @@
                             Padding="12" Margin="0,0,0,10">
                         <StackPanel>
                             <TextBlock Text="服务控制" Style="{StaticResource CardTitle}" />
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <TextBlock Text="翻译服务：" VerticalAlignment="Center" />
+                                <ComboBox x:Name="CmbActiveProvider" Width="168"
+                                          VerticalAlignment="Center"
+                                          SelectionChanged="CmbActiveProvider_SelectionChanged" />
+                                <Button x:Name="BtnManageProviders" Content="管理…" Margin="6,0,0,0"
+                                        Padding="8,3" Click="BtnManageProviders_Click"
+                                        ToolTip="添加/编辑/删除翻译服务（OpenAI 兼容 / 谷歌免费）" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                <TextBlock Text="llama 模型：" VerticalAlignment="Center" />
+                                <ComboBox x:Name="CmbLlamaModel" Width="222"
+                                          VerticalAlignment="Center"
+                                          SelectionChanged="CmbLlamaModel_SelectionChanged"
+                                          ToolTip="llama 目录里的 .gguf 模型；llama-server 运行中会自动重启生效" />
+                            </StackPanel>
                             <UniformGrid Columns="2">
                                 <Button x:Name="BtnStartLlama" Content="启动 llama-server"
                                         Style="{StaticResource PrimaryBtn}" Margin="0,0,4,0"
@@ -388,30 +404,7 @@
                             <TextBlock Text="翻译服务（Provider）" Style="{StaticResource CardTitle}" />
                             <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,6"
                                        TextWrapping="Wrap"
-                                       Text="插件永远只看到本地端点，切换 Provider 对游戏侧透明。auto = 按链路故障转移，全部失败时回显原文。" />
-                            <ComboBox x:Name="CmbProvider" Width="300" HorizontalAlignment="Left"
-                                      SelectionChanged="CmbProvider_SelectionChanged">
-                                <ComboBoxItem Content="本地 llama-server" Tag="local" />
-                                <ComboBoxItem Content="OpenAI 兼容 API（第三方）" Tag="openai" />
-                                <ComboBoxItem Content="谷歌免费翻译（无需密钥）" Tag="google" />
-                                <ComboBoxItem Content="自动故障转移 llama → OpenAI → 谷歌" Tag="auto" />
-                            </ComboBox>
-
-                            <TextBlock x:Name="LblOpenAi" Text="OpenAI 兼容端点 / 密钥 / 模型："
-                                       Style="{StaticResource Dim}" Margin="0,8,0,2" />
-                            <TextBox x:Name="TxtOpenAiEndpoint" Margin="0,2"
-                                     ToolTip="完整 URL，含 /v1/chat/completions" />
-                            <TextBox x:Name="TxtOpenAiKey" Margin="0,2"
-                                     ToolTip="API 密钥（明文保存在本机 settings.json）" />
-                            <TextBox x:Name="TxtOpenAiModel" Margin="0,2" />
-
-                            <TextBlock x:Name="LblGoogle" Text="谷歌免费翻译 语言对："
-                                       Style="{StaticResource Dim}" Margin="0,8,0,2" />
-                            <StackPanel Orientation="Horizontal">
-                                <TextBox x:Name="TxtGoogleSl" Width="110" Text="auto" />
-                                <TextBlock Text=" → " VerticalAlignment="Center" />
-                                <TextBox x:Name="TxtGoogleTl" Width="110" Text="zh-CN" />
-                            </StackPanel>
+                                       Text="插件永远只看到本地端点，切换翻译服务对游戏侧透明。在「服务控制」顶部选择当前服务；点「管理…」添加/编辑服务（OpenAI 兼容 / 谷歌免费 / B站免费 API 一键预设）。响应缓存跨服务共享，切换不清空。" />
 
                             <TextBlock Text="系统提示词（送模型的翻译指令，随 settings.json 本地保存）"
                                        Style="{StaticResource Dim}" Margin="0,10,0,2" />

@@ -22,6 +22,7 @@ WoW 3.3.5 客户端聊天实时翻译控制台 —— 纯本地运行（llama.cp
 - 多客户端画像：按客户端 exe 指纹自适应，Triumvirate、FrostmourneRebuffed 等加固客户端已适配（Grimfall 不兼容，已知限制）
 - llama-server 内存监控：工作集超阈值自动重启回收，进程崩溃自动拉起
 - 实时流量视图；`-Debug` 启动参数一键开启全部日志（DLL 日志 / 代理流量 / 内存采样），排错有据可查
+- 翻译服务可插拔：本地 llama / OpenAI 兼容 / 谷歌免费 / B站官方免费 API（Index-Translate-35B-A3B 一键预设），主窗口可添加多个、下拉切换；响应缓存跨服务共享，高频短句换服务不走模型
 
 ## 环境要求
 
@@ -33,7 +34,7 @@ WoW 3.3.5 客户端聊天实时翻译控制台 —— 纯本地运行（llama.cp
 
 1. 从 [Releases](https://github.com/ijnokmsc/WoWTranslateControl/releases) 下载 zip 解压，运行 `WoWTranslateControl.exe`
    （首次启动或刚更新后，杀软扫描 165MB 单文件可能等待十几秒；网络下载的文件请先右键 → 属性 → 解除锁定）
-2. 点「环境检测与下载向导」→ 下载 llama.cpp 与翻译模型 → 点「应用此模型」
+2. 点「环境检测与下载向导」→ 选择翻译服务：想先试试就选「免费 API」（免下载）；选「本地 AI」则继续下载 llama.cpp 与翻译模型 → 点「应用此模型」
 3. 点「一键启动全部」（8080 = 过滤代理，8081 = llama-server；端口占用自动顺延）
 4. **完全退出游戏**，主窗口「游戏目录与部署」填入客户端根目录 → 自动部署 DLL（首次部署自动备份原文件到 `wtc_backup\`）
 5. 进游戏，聊天框出现 `[WTC] WoWTranslateDirect 3.1.1 by ijnokmsc (driver v45, ...)` 横幅即部署成功

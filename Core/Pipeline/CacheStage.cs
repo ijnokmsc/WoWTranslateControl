@@ -14,7 +14,9 @@ namespace WoWTranslateControl.Core.Pipeline;
 /// 响应缓存阶段（3.0 双层缓存）。
 ///
 /// 设计（ADR-003 + 3.0 双层改造）：
-///   cache key = SHA256(原文 | 目标语 | 术语表版本 | ProviderId | systemPrompt哈希)
+///   cache key = SHA256(原文 | 目标语 | 术语表版本 | systemPrompt哈希)
+///   v50 起不再包含 ProviderId：切换翻译服务（本地 llama ↔ 云端 API）共享同一缓存，
+///   高频短句（ty/hi/求组）换服务不重新走模型。
 ///   —— 术语表任何增删改都会 bump Version，旧译文自然失效，不存在"改了没效果"。
 ///
 ///   热层（tier 2）：命中次数 ≥ HotThreshold 的词条晋升，永不按容量淘汰，
@@ -37,7 +39,6 @@ public sealed class CacheStage : IMessageStage, IDisposable
     private readonly AppConfig _cfg;
     private readonly GlossaryStore _glossary;
     private readonly string _path;
-    private readonly string _providerId;
     private readonly string _promptHash;
 
     private readonly ConcurrentDictionary<string, CacheItem> _entries = new();
@@ -48,12 +49,11 @@ public sealed class CacheStage : IMessageStage, IDisposable
     /// <summary>温层容量预算：所有条目原文长度累计上限（字符）。测试可覆盖。</summary>
     public long WarmCapacityChars { get; set; } = 256 * 1024;
 
-    public CacheStage(AppConfig cfg, GlossaryStore glossary, string path, string providerId)
+    public CacheStage(AppConfig cfg, GlossaryStore glossary, string path)
     {
         _cfg = cfg;
         _glossary = glossary;
         _path = path;
-        _providerId = providerId;
         _promptHash = Sha8(cfg.SystemPrompt);
         Load();
     }
@@ -122,13 +122,12 @@ public sealed class CacheStage : IMessageStage, IDisposable
 
     internal string BuildKey(TranslationContext ctx)
     {
-        // kv3：3.0 双层缓存格式升级，2.x 旧条目（kv2/kv1）全部自然废弃，不清文件。
+        // kv4：v50 缓存键移除 ProviderId（切翻译服务共享缓存），kv3 旧条目自然废弃，不清文件。
         var raw = string.Join('\x1f',
-            "kv3",
+            "kv4",
             ctx.Text,
             ctx.TargetLang ?? ctx.Config.InTargetLang,
             _glossary.Version.ToString(),
-            _providerId,
             _promptHash);
         return Sha8(raw);
     }

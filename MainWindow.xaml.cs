@@ -129,7 +129,10 @@ public partial class MainWindow : Window
             {
                 // 首次使用（还没装 llama.cpp）不自动启动 llama-server——
                 // 空跑只会报"未找到可执行文件"，应引导走向导
-                if (_cfg.AutoStartLlama)
+                var needsLlama = new Core.Providers.ProviderManager(_cfg).NeedsLlama;
+                if (_cfg.AutoStartLlama && !needsLlama)
+                    Log("当前翻译服务为远程 API，跳过 llama-server 自动启动");
+                else if (_cfg.AutoStartLlama)
                 {
                     if (File.Exists(Path.Combine(_cfg.LlamaDir, "llama-server.exe")))
                         StartLlama();
@@ -206,16 +209,10 @@ public partial class MainWindow : Window
         ChkChanWorld.IsChecked = _cfg.ChannelWorld;
         ChkChanUntagged.IsChecked = _cfg.ChannelUntagged;
 
-        // 翻译服务
-        foreach (System.Windows.Controls.ComboBoxItem item in CmbProvider.Items)
-            if ((string)item.Tag == _cfg.ProviderMode) { CmbProvider.SelectedItem = item; break; }
-        TxtOpenAiEndpoint.Text = _cfg.OpenAiEndpoint;
-        TxtOpenAiKey.Text = _cfg.OpenAiApiKey;
-        TxtOpenAiModel.Text = _cfg.OpenAiModel;
-        TxtGoogleSl.Text = _cfg.GoogleSl;
-        TxtGoogleTl.Text = _cfg.GoogleTl;
+        // 翻译服务（v50 添加模式）：下拉 = 本地 llama + 已添加条目
+        ReloadActiveProviderCombo();
         TxtSystemPrompt.Text = _cfg.SystemPrompt;
-        UpdateProviderFields();
+        ReloadLlamaModelCombo(_cfg.ModelFile);
 
         // 插件配置
         TxtGameDir.Text = _cfg.GameDir;
@@ -302,7 +299,12 @@ public partial class MainWindow : Window
 
     private void BtnStartAll_Click(object sender, RoutedEventArgs e)
     {
-        StartLlama();
+        // v50：非本地服务不需要 llama-server 进程
+        var manager = new Core.Providers.ProviderManager(_cfg);
+        if (manager.NeedsLlama)
+            StartLlama();
+        else
+            Log($"当前翻译服务为 {manager.ActiveDisplayName}，跳过 llama-server（切回「本地 llama」后一键启动会带起它）");
         // 代理不依赖模型就绪（未命中过滤时会等上游），可立即启动
         StartProxy();
     }
@@ -446,45 +448,106 @@ public partial class MainWindow : Window
 
     // ==================== 翻译服务（Provider） ====================
 
-    private void CmbProvider_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    private bool _suppressServiceEvents;
+
+    private void ReloadActiveProviderCombo()
     {
-        if (!IsLoaded) return;
-        SaveProviderFromUi();
-        UpdateProviderFields();
-        _cfg.Save();
+        _suppressServiceEvents = true;
+        try
+        {
+            var items = new List<KeyValuePair<string, string>>
+            {
+                new(Core.Providers.ProviderManager.LocalId, "本地 llama-server（本地 AI）"),
+            };
+            items.AddRange(_cfg.Providers.Select(p => new KeyValuePair<string, string>(p.Id, p.Name)));
+            CmbActiveProvider.ItemsSource = items;
+            CmbActiveProvider.DisplayMemberPath = "Value";
+            CmbActiveProvider.SelectedValuePath = "Key";
+            CmbActiveProvider.SelectedValue = _cfg.ActiveProviderId;
+            if ((CmbActiveProvider.SelectedValue as string) != _cfg.ActiveProviderId)
+                CmbActiveProvider.SelectedIndex = 0;   // 配置指向已删除服务 → 回落本地
+        }
+        finally { _suppressServiceEvents = false; }
     }
 
-    private void SaveProviderFromUi()
+    private void CmbActiveProvider_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
-        _cfg.ProviderMode = CmbProvider.SelectedItem is System.Windows.Controls.ComboBoxItem item
-            ? (string)item.Tag : "local";
-        _cfg.OpenAiEndpoint = TxtOpenAiEndpoint.Text.Trim();
-        _cfg.OpenAiApiKey = TxtOpenAiKey.Text.Trim();
-        _cfg.OpenAiModel = TxtOpenAiModel.Text.Trim();
-        _cfg.GoogleSl = string.IsNullOrWhiteSpace(TxtGoogleSl.Text) ? "auto" : TxtGoogleSl.Text.Trim();
-        _cfg.GoogleTl = string.IsNullOrWhiteSpace(TxtGoogleTl.Text) ? "zh-CN" : TxtGoogleTl.Text.Trim();
+        if (_suppressServiceEvents || !IsLoaded) return;
+        _cfg.ActiveProviderId = CmbActiveProvider.SelectedValue as string ?? "local";
+        _cfg.Save();
+        var manager = new Core.Providers.ProviderManager(_cfg);
+        Log($"翻译服务已切换：{manager.ActiveDisplayName}" +
+            (manager.NeedsLlama ? "" : "（无需 llama-server，一键启动将跳过它）"));
+    }
+
+    private void BtnManageProviders_Click(object sender, RoutedEventArgs e)
+    {
+        ReadConfigFromUi();
+        new ProviderWindow(_cfg) { Owner = this }.ShowDialog();
+        // 当前服务被删除 → 回落本地 llama
+        if (_cfg.ActiveProviderId != Core.Providers.ProviderManager.LocalId &&
+            _cfg.Providers.All(p => p.Id != _cfg.ActiveProviderId))
+            _cfg.ActiveProviderId = Core.Providers.ProviderManager.LocalId;
+        _cfg.Save();
+        ReloadActiveProviderCombo();
+        Log("翻译服务列表已更新：" +
+            (_cfg.Providers.Count == 0
+                ? "仅本地 llama"
+                : string.Join("、", _cfg.Providers.Select(p => p.Name))));
+    }
+
+    private void ReloadLlamaModelCombo(string? select)
+    {
+        _suppressServiceEvents = true;
+        try
+        {
+            var files = new List<string>();
+            try
+            {
+                if (Directory.Exists(_cfg.LlamaDir))
+                    files = Directory.GetFiles(_cfg.LlamaDir, "*.gguf")
+                        .Select(Path.GetFileName).Where(n => !string.IsNullOrEmpty(n)).Select(n => n!)
+                        .OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+            }
+            catch { }
+            CmbLlamaModel.ItemsSource = files;
+            CmbLlamaModel.SelectedItem = files.FirstOrDefault(f =>
+                string.Equals(f, select, StringComparison.OrdinalIgnoreCase)) ?? files.FirstOrDefault();
+        }
+        finally { _suppressServiceEvents = false; }
+    }
+
+    private void CmbLlamaModel_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_suppressServiceEvents || !IsLoaded) return;
+        if (CmbLlamaModel.SelectedItem is not string model) return;
+        _cfg.ModelFile = model;
+        TxtModel.Text = model;
+        _cfg.Save();
+        if (_llama is { State: LlamaState.Running or LlamaState.Starting })
+        {
+            Log($"已切换模型：{model}，重启 llama-server 生效…");
+            Task.Run(() => _llama?.Restart("切换模型"));
+        }
+        else
+        {
+            Log($"已选择模型：{model}（下次启动 llama-server 生效）");
+        }
+    }
+
+    private void SyncSystemPromptFromUi()
+    {
         // 系统提示词：保留用户输入的换行与缩进，仅去掉首尾空白；空则回退默认
         var prompt = TxtSystemPrompt.Text.Trim();
         _cfg.SystemPrompt = prompt.Length > 0 ? prompt : AppConfig.DefaultSystemPrompt;
     }
 
-    private void UpdateProviderFields()
-    {
-        var showOpenAi = _cfg.ProviderMode is "openai" or "auto";
-        var showGoogle = _cfg.ProviderMode is "google" or "auto";
-        LblOpenAi.Visibility = showOpenAi ? Visibility.Visible : Visibility.Collapsed;
-        TxtOpenAiEndpoint.Visibility = showOpenAi ? Visibility.Visible : Visibility.Collapsed;
-        TxtOpenAiKey.Visibility = showOpenAi ? Visibility.Visible : Visibility.Collapsed;
-        TxtOpenAiModel.Visibility = showOpenAi ? Visibility.Visible : Visibility.Collapsed;
-        LblGoogle.Visibility = showGoogle ? Visibility.Visible : Visibility.Collapsed;
-    }
-
     private async void BtnTestProvider_Click(object sender, RoutedEventArgs e)
     {
-        SaveProviderFromUi();
+        SyncSystemPromptFromUi();
         _cfg.Save();
         BtnTestProvider.IsEnabled = false;
-        Log("正在测试翻译服务…");
+        Log("正在测试当前翻译服务…");
         try
         {
             var manager = new Core.Providers.ProviderManager(_cfg);
@@ -493,7 +556,7 @@ public partial class MainWindow : Window
             var reply = await manager.TranslateAsync(ctx, CancellationToken.None);
             sw.Stop();
             Log(reply.Ok
-                ? $"✅ 翻译服务测试通过（{manager.PrimaryId}，{sw.ElapsedMilliseconds}ms）：{reply.Translated}"
+                ? $"✅ 翻译服务测试通过（{manager.ActiveDisplayName}，{sw.ElapsedMilliseconds}ms）：{reply.Translated}"
                 : $"❌ 翻译服务测试失败：{reply.Error}");
             Log($"翻译服务测试：{(reply.Ok ? "成功" : "失败")} {reply.Error}");
         }
