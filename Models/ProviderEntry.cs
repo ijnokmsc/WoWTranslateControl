@@ -32,6 +32,9 @@ public sealed class ProviderEntry
     /// <summary>类型显示名（列表/下拉用）。</summary>
     public string TypeLabel => Type == "google" ? "谷歌免费翻译" : "OpenAI 兼容";
 
+    /// <summary>列表摘要（管理对话框用）：openai 显示模型名，google 显示语言对。</summary>
+    public string Summary => Type == "google" ? $"{GoogleSl} → {GoogleTl}" : Model;
+
     // ---- 官方免费 API 预设（bilibili Index-Translate，向导「免费 API」与管理对话框共用） ----
     public const string FreeApiName = "Index-Translate 免费 API（B站官方）";
     public const string FreeApiEndpoint = "https://index-translate.bilibili.com/v1/chat/completions";

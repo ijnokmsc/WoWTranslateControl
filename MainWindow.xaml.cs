@@ -450,22 +450,27 @@ public partial class MainWindow : Window
 
     private bool _suppressServiceEvents;
 
+    /// <summary>服务下拉条目。ToString 直接给 Label——不能用 KeyValuePair+DisplayMemberPath：
+    /// 先设 ItemsSource 后设 DisplayMemberPath 时，WPF 关闭态选择框不刷新模板，
+    /// 会把 ToString 的 "[Id, 名称]" 截断显示成一串乱码 ID。</summary>
+    private sealed record SvcItem(string Id, string Label)
+    {
+        public override string ToString() => Label;
+    }
+
     private void ReloadActiveProviderCombo()
     {
         _suppressServiceEvents = true;
         try
         {
-            var items = new List<KeyValuePair<string, string>>
+            var items = new List<SvcItem>
             {
                 new(Core.Providers.ProviderManager.LocalId, "本地 llama-server（本地 AI）"),
             };
-            items.AddRange(_cfg.Providers.Select(p => new KeyValuePair<string, string>(p.Id, p.Name)));
+            items.AddRange(_cfg.Providers.Select(p => new SvcItem(p.Id, p.Name)));
             CmbActiveProvider.ItemsSource = items;
-            CmbActiveProvider.DisplayMemberPath = "Value";
-            CmbActiveProvider.SelectedValuePath = "Key";
-            CmbActiveProvider.SelectedValue = _cfg.ActiveProviderId;
-            if ((CmbActiveProvider.SelectedValue as string) != _cfg.ActiveProviderId)
-                CmbActiveProvider.SelectedIndex = 0;   // 配置指向已删除服务 → 回落本地
+            CmbActiveProvider.SelectedItem =
+                items.FirstOrDefault(i => i.Id == _cfg.ActiveProviderId) ?? items[0];
         }
         finally { _suppressServiceEvents = false; }
     }
@@ -473,7 +478,7 @@ public partial class MainWindow : Window
     private void CmbActiveProvider_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
         if (_suppressServiceEvents || !IsLoaded) return;
-        _cfg.ActiveProviderId = CmbActiveProvider.SelectedValue as string ?? "local";
+        _cfg.ActiveProviderId = (CmbActiveProvider.SelectedItem as SvcItem)?.Id ?? "local";
         _cfg.Save();
         var manager = new Core.Providers.ProviderManager(_cfg);
         Log($"翻译服务已切换：{manager.ActiveDisplayName}" +

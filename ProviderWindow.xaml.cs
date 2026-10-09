@@ -8,13 +8,13 @@ namespace WoWTranslateControl;
 
 /// <summary>
 /// 翻译服务管理对话框（v50 Provider 添加模式）：增删改 Providers 列表。
-/// 条目直接编辑 AppConfig.Providers 内存对象，「保存并关闭」时由调用方落盘。
+/// 条目直接编辑 AppConfig.Providers 内存对象，「保存并关闭」后由调用方重新加载下拉。
 /// </summary>
 public partial class ProviderWindow : Window
 {
     private readonly AppConfig _cfg;
 
-    /// <summary>列表内容是否有改动（调用方据此重新加载下拉并落盘）。</summary>
+    /// <summary>列表内容是否有改动（调用方据此重新加载下拉）。</summary>
     public bool Saved { get; private set; }
 
     public ProviderWindow(AppConfig cfg)
@@ -22,6 +22,8 @@ public partial class ProviderWindow : Window
         InitializeComponent();
         _cfg = cfg;
         ReloadList();
+        if (LstProviders.Items.Count > 0)
+            LstProviders.SelectedIndex = 0;
         UpdateFormVisibility();
     }
 
@@ -39,6 +41,7 @@ public partial class ProviderWindow : Window
     private void LoadEntryToForm()
     {
         var p = Selected;
+        TxtEditingName.Text = p?.Name ?? "（未选中）";
         if (p == null)
         {
             TxtName.Text = TxtEndpoint.Text = TxtApiKey.Text = TxtModel.Text = "";
@@ -65,7 +68,12 @@ public partial class ProviderWindow : Window
         CmbType.SelectedItem is ComboBoxItem item ? (string)item.Tag : "openai";
 
     private void CmbType_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        => UpdateFormVisibility();
+    {
+        UpdateFormVisibility();
+        // 切类型是编辑中状态：提示尚未保存，避免误以为已生效
+        if (Selected != null && IsLoaded)
+            TxtHint.Text = "类型已切换（未保存）——核对字段后点「保存修改」";
+    }
 
     private void UpdateFormVisibility()
     {
@@ -78,11 +86,12 @@ public partial class ProviderWindow : Window
     {
         var entry = new ProviderEntry { Name = "新翻译服务", Type = "openai" };
         _cfg.Providers.Add(entry);
+        Saved = true;
         ReloadList();
         LstProviders.SelectedItem = entry;
         TxtName.SelectAll();
         TxtName.Focus();
-        TxtHint.Text = "已添加，填好表单后点「保存到选中服务」";
+        TxtHint.Text = "已添加，填好表单后点「保存修改」";
     }
 
     private void BtnAddFreeApi_Click(object sender, RoutedEventArgs e)
@@ -92,14 +101,15 @@ public partial class ProviderWindow : Window
         if (existing != null)
         {
             LstProviders.SelectedItem = existing;
-            TxtHint.Text = "免费 API 已在列表中";
+            TxtHint.Text = "免费 API 已在列表中（OpenAI 兼容类型，非谷歌翻译）";
             return;
         }
         var entry = ProviderEntry.CreateFreeApi();
         _cfg.Providers.Add(entry);
+        Saved = true;
         ReloadList();
         LstProviders.SelectedItem = entry;
-        TxtHint.Text = "免费 API 已添加";
+        TxtHint.Text = "免费 API 已添加（OpenAI 兼容类型）";
     }
 
     private void BtnDelete_Click(object sender, RoutedEventArgs e)
@@ -112,6 +122,7 @@ public partial class ProviderWindow : Window
         _cfg.Providers.Remove(p);
         Saved = true;
         ReloadList();
+        LoadEntryToForm();
         TxtHint.Text = "已删除";
     }
 
@@ -147,6 +158,7 @@ public partial class ProviderWindow : Window
         Saved = true;
         ReloadList();
         LstProviders.SelectedItem = p;
+        TxtEditingName.Text = p.Name;
         TxtHint.Text = "已保存";
     }
 
