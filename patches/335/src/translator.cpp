@@ -352,7 +352,8 @@ void Translator::WorkerLoop()
                 {
                     std::string error;
                     std::string tr = TranslateOne(job, error);
-                    if (!error.empty())
+                    // 频道被过滤（channel-filtered）是确定性结果，不重试
+                    if (!error.empty() && error.find("channel-filtered") == std::string::npos)
                     {
                         // 瞬态失败（网络抖动/上游瞬时故障）单次重试，重试仍败才回传错误
                         Sleep(400);

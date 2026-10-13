@@ -199,7 +199,9 @@ local function EchoOriginal(p)
   if p.sender ~= "" then
     line = line .. "|Hplayer:" .. p.sender .. "|h[" .. p.sender .. "]|h： "
   end
-  DisplayLine(line .. p.text, 1, 0.4, 0.4)
+  -- v48：用频道颜色回显（原为固定红色——超时/被过滤的原文与成功译文
+  -- 三色混杂；同频道统一颜色，[译] 前缀的有无区分是否真的翻译了）
+  DisplayLine(line .. p.text, p.r or 1, p.g or 0.4, p.b or 0.4)
 end
 
 -- ---- 捕获去重查询：只查不标（标记由 TryCapture 负责）----

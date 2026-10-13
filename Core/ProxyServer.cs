@@ -361,7 +361,11 @@ public sealed class ProxyServer : IDisposable
             else Interlocked.Increment(ref FilteredCount);
 
             Emit(result.Kind, result.RuleId, result.RuleName, result.Content, sw, ctx.Channel);
-            var resp = BuildOpenAiResponse(result.Content);
+            // 被过滤（频道关闭/质检拦截）→ error 体应答：驱动据此纯原文回显。
+            // 原文当译文返回会让 replace 模式显示 [译] 原文，看起来"还在被翻译"。
+            var resp = result.Kind == TrafficKind.Filtered
+                ? "{\"error\":\"channel-filtered\"}"
+                : BuildOpenAiResponse(result.Content);
             await SendAsync(stream, 200, resp, keepAlive, ct).ConfigureAwait(false);
             return;
         }
