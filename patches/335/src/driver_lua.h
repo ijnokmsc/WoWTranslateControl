@@ -206,6 +206,18 @@ local function SeenCheck(ch, sender, msg)
 end
 
 -- 捕获主体：入队翻译。返回 "queued"（首次）或 "dup"（重复）。
+-- v47：自定义频道按编号取色——ChatTypeInfo.CHANNEL 是所有自定义频道共用
+-- 的一个颜色，CHANNEL:n 编号查表得 nil 后全部回退白色，综合/本地无法区分。
+-- 编号 1-10 各配一色（深色聊天背景可读），超出按 10 取模循环。
+local CHAN_NUM_COLORS = {
+  {1, .72, .35}, {.55, 1, .55}, {.45, .75, 1}, {1, .55, .55}, {1, .9, .4},
+  {.7, .6, 1}, {.4, 1, .9}, {1, .6, .85}, {.85, .85, .5}, {.6, .85, 1},
+}
+local function ChanNumColor(num)
+  local c = CHAN_NUM_COLORS[((num - 1) % #CHAN_NUM_COLORS) + 1]
+  return c[1], c[2], c[3]
+end
+
 local function TryCapture(ch, msg, sender, chanLabel)
   local key = ch .. "|" .. tostring(sender) .. "|" .. msg
   if seen[key] and GetTime() - seen[key] < 60 then
@@ -272,17 +284,6 @@ local function ChannelTag(ch, ...)
   return num and ("CHANNEL:" .. num) or "CHANNEL"
 end
 
--- v47：自定义频道按编号取色——ChatTypeInfo.CHANNEL 是所有自定义频道共用
--- 的一个颜色，CHANNEL:n 编号查表得 nil 后全部回退白色，综合/本地无法区分。
--- 编号 1-10 各配一色（深色聊天背景可读），超出按 10 取模循环。
-local CHAN_NUM_COLORS = {
-  {1, .72, .35}, {.55, 1, .55}, {.45, .75, 1}, {1, .55, .55}, {1, .9, .4},
-  {.7, .6, 1}, {.4, 1, .9}, {1, .6, .85}, {.85, .85, .5}, {.6, .85, 1},
-}
-local function ChanNumColor(num)
-  local c = CHAN_NUM_COLORS[((num - 1) % #CHAN_NUM_COLORS) + 1]
-  return c[1], c[2], c[3]
-end
 
 -- 消息是否应送翻（频道已知 + 非空 + 非自己发言 + 非中文 + 非已译标识）
 -- 中文判定（编码无关）：任一字节 >= 0x81 即含 CJK（GBK 双字节首位/UTF-8 首字节均为高位）
