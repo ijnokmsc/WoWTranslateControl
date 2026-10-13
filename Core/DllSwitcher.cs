@@ -116,10 +116,12 @@ public sealed class DllSwitcher
         if (displayMode != "replace" && displayMode != "both") displayMode = "replace";
         if (outgoingMode != "off" && outgoingMode != "replace" && outgoingMode != "both")
             outgoingMode = "off";
-        var hasColor = TryParseHexColor(customColor, out var cr, out var cg, out var cb);
+        var isNative = string.Equals((customColor ?? "").Trim(), "native", StringComparison.OrdinalIgnoreCase);
+        double cr = 0, cg = 0, cb = 0;
+        var hasColor = !isNative && TryParseHexColor(customColor, out cr, out cg, out cb);
         string Num(double v) => hasColor
             ? v.ToString(System.Globalization.CultureInfo.InvariantCulture)
-            : "-1";
+            : (isNative ? "-2" : "-1");
         var json =
             "{\n" +
             "  \"provider\": \"openai\",\n" +

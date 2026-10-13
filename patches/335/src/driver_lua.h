@@ -195,13 +195,20 @@ end
 -- 翻译失败/超时兜底：回显原文并重建头部（频道标签+玩家链接），不再只显正文
 local function EchoOriginal(p)
   local line = ""
-  if p.chanLabel ~= "" then line = p.chanLabel .. " " end
+  local labelPart = ""
+  if p.chanLabel ~= "" then labelPart = p.chanLabel .. " " end
+  local lr, lg, lb = p.r or 1, p.g or 0.4, p.b or 0.4
+  -- v49：原色显示——自定义编号频道标签着色、正文白色
+  if p.tag and string.sub(p.tag, 1, 8) == "CHANNEL:" and customColorR == -2 then
+    labelPart = "|cff3fc1ff" .. labelPart .. "|r"
+    lr, lg, lb = 1, 1, 1
+  end
+  -- v48：回显与译文同色（同频道统一颜色，[译] 前缀的有无区分是否真的翻译了）
+  line = line .. labelPart
   if p.sender ~= "" then
     line = line .. "|Hplayer:" .. p.sender .. "|h[" .. p.sender .. "]|h： "
   end
-  -- v48：用频道颜色回显（原为固定红色——超时/被过滤的原文与成功译文
-  -- 三色混杂；同频道统一颜色，[译] 前缀的有无区分是否真的翻译了）
-  DisplayLine(line .. p.text, p.r or 1, p.g or 0.4, p.b or 0.4)
+  DisplayLine(line .. p.text, lr, lg, lb)
 end
 
 -- ---- 捕获去重查询：只查不标（标记由 TryCapture 负责）----
@@ -249,7 +256,9 @@ local function TryCapture(ch, msg, sender, chanLabel)
   local mid = "m" .. counter
   local r, g, b
   if string.sub(ch, 1, 8) == "CHANNEL:" then
-    if customColorR >= 0 then
+    if customColorR == -2 then
+      r, g, b = 1, 1, 1   -- 原色显示：正文白色，频道标签由显示期着色
+    elseif customColorR >= 0 then
       r, g, b = customColorR, customColorG, customColorB
     else
       r, g, b = ChanNumColor(tonumber(string.sub(ch, 9)) or 1)
@@ -260,6 +269,7 @@ local function TryCapture(ch, msg, sender, chanLabel)
   end
   pending[mid] = { sender = tostring(sender or ""), text = msg,
                    chanLabel = chanLabel or "", suppressed = false,
+                   tag = ch,
                    r = r, g = g, b = b,
                    t = GetTime(), done = false }
   local ok = pcall(function()
@@ -462,15 +472,25 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
           EchoOriginal(p)
         else
           local line = ""
-          if p.chanLabel ~= "" then line = p.chanLabel .. " " end
+          local labelPart = ""
+          if p.chanLabel ~= "" then labelPart = p.chanLabel .. " " end
+          local lr, lg, lb = p.r, p.g, p.b
+          -- v49：原色显示——自定义编号频道标签着色、正文白色
+          if p.tag and string.sub(p.tag, 1, 8) == "CHANNEL:" and customColorR == -2 then
+            labelPart = "|cff3fc1ff" .. labelPart .. "|r"
+            lr, lg, lb = 1, 1, 1
+          elseif p.tag and string.sub(p.tag, 1, 8) == "CHANNEL:" and customColorR >= 0 then
+            lr, lg, lb = customColorR, customColorG, customColorB
+          end
+          line = labelPart
           if p.sender ~= "" then
             line = line .. "|Hplayer:" .. p.sender .. "|h[" .. p.sender .. "]|h： "
           end
           line = line .. dispPrefix .. " " .. tr
           if displayMode == "both" then
-            DisplayLine(dispPrefix .. line, p.r, p.g, p.b)
+            DisplayLine(dispPrefix .. line, lr, lg, lb)
           else
-            DisplayLine(line, p.r, p.g, p.b)
+            DisplayLine(line, lr, lg, lb)
           end
         end
       end
@@ -574,7 +594,7 @@ local function BannerPrint()
   if bannerPrints >= 2 then return end
   bannerPrints = bannerPrints + 1
   if DEFAULT_CHAT_FRAME then
-    DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.2.1 by ijnokmsc (driver v48, mode=" ..
+    DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.2.1 by ijnokmsc (driver v49, mode=" ..
       displayMode .. ", outgoing=" .. outgoingMode .. ")")
   end
 end

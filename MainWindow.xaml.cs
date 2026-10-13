@@ -56,6 +56,9 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<TrafficRow> _allRows = new();
     private readonly ObservableCollection<TrafficRow> _view = new();
 
+    /// <summary>标题栏固定部分（版本 + 署名）；翻译服务名动态追加。</summary>
+    private string _baseTitle = "";
+
     private readonly DispatcherTimer _uiTimer;
     private readonly DispatcherTimer _clockTimer;
 
@@ -78,6 +81,8 @@ public partial class MainWindow : Window
         // 标题版本号取自程序集版本（随 csproj <Version> 变化），避免 XAML 硬编码漂移
         Title = $"WoWTranslate 控制台 v{System.Reflection.Assembly.GetEntryAssembly()!.GetName().Version!.ToString(3)}" +
                 " — Direct DLL 翻译 · ijnokmsc";
+        _baseTitle = Title;
+        UpdateTitleWithService();
 
         // 窗口/任务栏图标：从 exe 旁的 assets\app.ico 加载（XAML 相对 URI 在编译后的
         // BAML 里不指向 exe 目录，会抛异常，故用代码加载）
@@ -495,7 +500,11 @@ public partial class MainWindow : Window
     }
 
     private void UpdateChanColorSwatch()
-        => ChanColorSwatch.Background = new System.Windows.Media.SolidColorBrush(ParseChanColor(_cfg.CustomChannelColor));
+    {
+        var native = string.Equals((_cfg.CustomChannelColor ?? "").Trim(), "native", StringComparison.OrdinalIgnoreCase);
+        ChanColorSwatch.Background = new System.Windows.Media.SolidColorBrush(
+            native ? System.Windows.Media.Color.FromRgb(0x3F, 0xC1, 0xFF) : ParseChanColor(_cfg.CustomChannelColor));
+    }
 
     private void BtnChanColor_Click(object sender, RoutedEventArgs e)
     {
@@ -506,6 +515,15 @@ public partial class MainWindow : Window
         UpdateChanColorSwatch();
         SyncDirectConfigToGameDir();
         Log($"综合频道译文颜色已设置为 {_cfg.CustomChannelColor}（游戏内 /reload 生效）");
+    }
+
+    private void BtnChanColorNative_Click(object sender, RoutedEventArgs e)
+    {
+        _cfg.CustomChannelColor = "native";
+        _cfg.Save();
+        UpdateChanColorSwatch();
+        SyncDirectConfigToGameDir();
+        Log("综合频道译文已切换原色显示：频道标签着色、正文白色（游戏内 /reload 生效）");
     }
 
     private void BtnChanColorReset_Click(object sender, RoutedEventArgs e)
@@ -544,8 +562,16 @@ public partial class MainWindow : Window
             CmbActiveProvider.ItemsSource = items;
             CmbActiveProvider.SelectedItem =
                 items.FirstOrDefault(i => i.Id == _cfg.ActiveProviderId) ?? items[0];
+            UpdateTitleWithService();
         }
         finally { _suppressServiceEvents = false; }
+    }
+
+    /// <summary>标题栏追加当前翻译服务（服务控制下拉切换时同步刷新）。</summary>
+    private void UpdateTitleWithService()
+    {
+        var svc = new Core.Providers.ProviderManager(_cfg).ActiveDisplayName;
+        Title = _baseTitle + " ｜ 翻译服务：" + svc;
     }
 
     private void CmbActiveProvider_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
