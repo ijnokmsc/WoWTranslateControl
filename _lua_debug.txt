@@ -39,6 +39,11 @@ local displayMode = tostring(WTC_CFG.displayMode or "replace")
 local dispPrefix = tostring(WTC_CFG.prefix or "[译]")
 local outgoingMode = tostring(WTC_CFG.outgoing or "off")
 local outTimeout = tonumber(WTC_CFG.outTimeout or 25)
+-- v48：综合(自定义编号)频道译文颜色——控制台可配置（customR/G/B 0-1，
+-- <0 = 未配置，按编号调色板取色）
+local customColorR = tonumber(WTC_CFG.customR or -1)
+local customColorG = tonumber(WTC_CFG.customG or -1)
+local customColorB = tonumber(WTC_CFG.customB or -1)
 
 local pending, counter = {}, 0
 local outPending, outCounter = {}, 0
@@ -142,11 +147,14 @@ end
 -- 翻译失败/超时兜底：回显原文并重建头部（频道标签+玩家链接），不再只显正文
 local function EchoOriginal(p)
   local line = ""
-  if p.chanLabel ~= "" then line = p.chanLabel .. " " end
+  if p.chanLabel ~= "" then line = line .. p.chanLabel .. " " end
+  -- v49：原色模式整行走频道色（TryCapture 已按 customR 取好）；
+  -- 回显与译文同色，[译] 前缀的有无区分是否真的翻译了
+  local lr, lg, lb = p.r or 1, p.g or 0.4, p.b or 0.4
   if p.sender ~= "" then
     line = line .. "|Hplayer:" .. p.sender .. "|h[" .. p.sender .. "]|h： "
   end
-  DisplayLine(line .. p.text, 1, 0.4, 0.4)
+  DisplayLine(line .. p.text, lr, lg, lb)
 end
 
 -- ---- 捕获去重查询：只查不标（标记由 TryCapture 负责）----
@@ -158,6 +166,18 @@ local function SeenCheck(ch, sender, msg)
 end
 
 -- 捕获主体：入队翻译。返回 "queued"（首次）或 "dup"（重复）。
+-- v47：自定义频道按编号取色——ChatTypeInfo.CHANNEL 是所有自定义频道共用
+-- 的一个颜色，CHANNEL:n 编号查表得 nil 后全部回退白色，综合/本地无法区分。
+-- 编号 1-10 各配一色（深色聊天背景可读），超出按 10 取模循环。
+local CHAN_NUM_COLORS = {
+  {1, .72, .35}, {.55, 1, .55}, {.45, .75, 1}, {1, .55, .55}, {1, .9, .4},
+  {.7, .6, 1}, {.4, 1, .9}, {1, .6, .85}, {.85, .85, .5}, {.6, .85, 1},
+}
+local function ChanNumColor(num)
+  local c = CHAN_NUM_COLORS[((num - 1) % #CHAN_NUM_COLORS) + 1]
+  return c[1], c[2], c[3]
+end
+
 local function TryCapture(ch, msg, sender, chanLabel)
   local key = ch .. "|" .. tostring(sender) .. "|" .. msg
   if seen[key] and GetTime() - seen[key] < 60 then
@@ -180,10 +200,23 @@ local function TryCapture(ch, msg, sender, chanLabel)
   end
   counter = counter + 1
   local mid = "m" .. counter
-  local ci = ChatTypeInfo[CHAT_TYPE[ch]]
+  local r, g, b
+  if string.sub(ch, 1, 8) == "CHANNEL:" then
+    if customColorR >= 0 then
+      r, g, b = customColorR, customColorG, customColorB
+    else
+      -- 原色(-2)与按编号(-1)都以 ChatTypeInfo.CHANNEL 为准（经典频道黄）
+      local ci = ChatTypeInfo.CHANNEL
+      r, g, b = ci and ci.r or 1, ci and ci.g or .8, ci and ci.b or .5
+    end
+  else
+    local ci = ChatTypeInfo[CHAT_TYPE[ch]]
+    r, g, b = ci and ci.r, ci and ci.g, ci and ci.b
+  end
   pending[mid] = { sender = tostring(sender or ""), text = msg,
                    chanLabel = chanLabel or "", suppressed = false,
-                   r = ci and ci.r, g = ci and ci.g, b = ci and ci.b,
+                   tag = ch,
+                   r = r, g = g, b = b,
                    t = GetTime(), done = false }
   local ok = pcall(function()
     local rr = WoWTranslate_Translate("\1" .. ch .. "\1" .. msg, "en", "zh", mid)
@@ -208,6 +241,16 @@ local function ChanLabel(ch, ...)
   end
   return CHAN_CN[ch] or ""
 end
+
+-- v46：自定义频道按编号上报（CHANNEL:编号）——控制台据此归类
+-- （综合含世界 / 本地防务 / 其他自定义），编号取自频道名前缀（如 "2. 综合"）
+local function ChannelTag(ch, ...)
+  if ch ~= "CHANNEL" then return ch end
+  local nm = select(2, ...)
+  local num = nm and string.match(tostring(nm), "^(%d+)")
+  return num and ("CHANNEL:" .. num) or "CHANNEL"
+end
+
 
 -- 消息是否应送翻（频道已知 + 非空 + 非自己发言 + 非中文 + 非已译标识）
 -- 中文判定（编码无关）：任一字节 >= 0x81 即含 CJK（GBK 双字节首位/UTF-8 首字节均为高位）
@@ -234,7 +277,7 @@ local suppressCount = 0
 local function WTCSuppressFilter(chatFrame, event, msg, sender, ...)
   local ch = ShouldTranslate(event, msg, sender)
   if not ch then return false end
-  TryCapture(ch, msg, sender, ChanLabel(ch, ...))
+  TryCapture(ChannelTag(ch, ...), msg, sender, ChanLabel(ch, ...))
   -- 仅 replace 模式压制原文；both 模式放行（原文照显，译文由轮询追加）
   if displayMode ~= "replace" then return false end
   -- queued 与 dup 统一处理：dup = 事件帧先入队（派发顺序竞争），条目已在
@@ -288,7 +331,7 @@ ef:SetScript("OnEvent", function(self, event, msg, sender, ...)
 
   -- 过滤器已捕获过的（60s 窗口）→ 跳过
   if SeenCheck(ch, tostring(sender or ""), msg) then return end
-  TryCapture(ch, msg, sender, ChanLabel(ch, ...))
+  TryCapture(ChannelTag(ch, ...), msg, sender, ChanLabel(ch, ...))
 end)
 
 -- v33 探针：包装前 3 个聊天框的 OnEvent 脚本（EUI/巨龙UI 若替换了脚本，
@@ -367,18 +410,28 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
         end
         -- 译文显示行：标识统一紧贴正文前方（[chanLabel] [sender]： [译] 译文）
         if tr ~= "" and (tr == otxt or tr == p.text) and not p.suppressed then
-          -- skip
+          -- skip（未压制：原文已自然显示）
+        elseif tr ~= "" and (tr == otxt or tr == p.text) then
+          -- 译文=原文（该频道被过滤/控制台放行原文）且原文已压制：
+          -- 按纯原文回显，不带 [译] 前缀——否则看起来像"还在被翻译"
+          EchoOriginal(p)
         else
           local line = ""
           if p.chanLabel ~= "" then line = p.chanLabel .. " " end
+          local lr, lg, lb = p.r, p.g, p.b
+          -- v49：配置色（customR>=0）优先；原色/按编号在捕获时已取频道色
+          if p.tag and string.sub(p.tag, 1, 8) == "CHANNEL:" and customColorR >= 0 then
+            lr, lg, lb = customColorR, customColorG, customColorB
+          end
+          line = line
           if p.sender ~= "" then
             line = line .. "|Hplayer:" .. p.sender .. "|h[" .. p.sender .. "]|h： "
           end
           line = line .. dispPrefix .. " " .. tr
           if displayMode == "both" then
-            DisplayLine(dispPrefix .. line, p.r, p.g, p.b)
+            DisplayLine(dispPrefix .. line, lr, lg, lb)
           else
-            DisplayLine(line, p.r, p.g, p.b)
+            DisplayLine(line, lr, lg, lb)
           end
         end
       end
@@ -475,38 +528,41 @@ SendChatMessage = function(msg, chatType, language, channel)
 end
 
 -- 横幅：延迟到 PLAYER_ENTERING_WORLD + 1s 显示（加载屏阶段写入会被清掉）
-local bannerShown = false
+local bannerPrints = 0
 local bannerFrame = CreateFrame("Frame")
 bannerFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 local function BannerPrint()
-  if bannerShown then return end
-  bannerShown = true
+  if bannerPrints >= 2 then return end
+  bannerPrints = bannerPrints + 1
   if DEFAULT_CHAT_FRAME then
-    DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.1.1 by ijnokmsc (driver v45, mode=" ..
+    DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.2.1 by ijnokmsc (driver v49, mode=" ..
       displayMode .. ", outgoing=" .. outgoingMode .. ")")
   end
 end
+local pewFired = false
 bannerFrame:SetScript("OnEvent", function()
-  if bannerShown then return end
-  bannerShown = true
-  local acc = 0
-  bannerFrame:SetScript("OnUpdate", function(self, el)
-    acc = acc + el
-    if acc < 1 then return end
-    self:SetScript("OnUpdate", nil)
-    BannerPrint()
-  end)
+  pewFired = true
 end)
--- v43 兜底：驱动加载晚于 PLAYER_ENTERING_WORLD 时（注入等浅栈窗口有秒级波动），
--- PEW 事件已错过、横幅永远不显示 → 加载 12 秒后仍未显示则强制打印
--- （此时加载屏必然已结束；正常路径 PEW+1s 先行，bannerShown 拦住重复）。
+-- v48 横幅时序修复：旧实现 PEW 一触发就置 bannerShown，v43 的 12s 兜底
+-- 被 bannerShown 拦死——PEW+1s 的打印若发生在加载屏/EUI 重建期间被清掉，
+-- 横幅就永久丢失（翻译正常但看不到横幅的根因）。
+-- 新时序：单一 OnUpdate 双阶段——进世界后 1s 打第一遍；12s 时若尚未打满
+-- 2 次则补打一遍（第一遍被吞时必然补上；最多 2 条，防刷屏）。
 do
   local acc = 0
   bannerFrame:SetScript("OnUpdate", function(self, el)
     acc = acc + el
-    if acc < 12 then return end
-    self:SetScript("OnUpdate", nil)
-    BannerPrint()
+    if bannerPrints >= 2 then
+      self:SetScript("OnUpdate", nil)
+      return
+    end
+    if pewFired and acc >= 1 and bannerPrints == 0 then
+      BannerPrint()
+    end
+    if acc >= 12 then
+      BannerPrint()
+      self:SetScript("OnUpdate", nil)
+    end
   end)
 end
 
