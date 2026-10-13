@@ -23,6 +23,8 @@ public sealed class TrafficRow
     public int ElapsedMs { get; init; }
     /// <summary>聊天频道名（GUILD/SAY…）；null = 无频道标签的系统播报。</summary>
     public string? Channel { get; init; }
+    /// <summary>频道显示文本（频道列绑定用；无标签显示 -，空白单元格会被误读为功能失效）。</summary>
+    public string ChannelText => string.IsNullOrEmpty(Channel) ? "-" : Channel;
 }
 
 public partial class MainWindow : Window
