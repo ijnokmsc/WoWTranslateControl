@@ -185,6 +185,9 @@ public sealed class AppConfig
     public string ChannelSynthNums { get; set; } = "1,2,3,4,5,6,7,8,9,10";
     public bool ChannelSynth { get; set; } = true;
 
+    /// <summary>综合(自定义编号)频道译文颜色（#RRGGBB；空 = 按编号自动配色）。</summary>
+    public string CustomChannelColor { get; set; } = "";
+
     // ---------- 界面 ----------
     /// <summary>流量列表最多保留多少行，防止长时间挂机后 UI 卡顿或内存增长。</summary>
     public int LogMaxRows { get; set; } = 400;

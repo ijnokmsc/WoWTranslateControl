@@ -87,6 +87,11 @@ local displayMode = tostring(WTC_CFG.displayMode or "replace")
 local dispPrefix = tostring(WTC_CFG.prefix or "[译]")
 local outgoingMode = tostring(WTC_CFG.outgoing or "off")
 local outTimeout = tonumber(WTC_CFG.outTimeout or 25)
+-- v48：综合(自定义编号)频道译文颜色——控制台可配置（customR/G/B 0-1，
+-- <0 = 未配置，按编号调色板取色）
+local customColorR = tonumber(WTC_CFG.customR or -1)
+local customColorG = tonumber(WTC_CFG.customG or -1)
+local customColorB = tonumber(WTC_CFG.customB or -1)
 
 local pending, counter = {}, 0
 local outPending, outCounter = {}, 0
@@ -242,7 +247,11 @@ local function TryCapture(ch, msg, sender, chanLabel)
   local mid = "m" .. counter
   local r, g, b
   if string.sub(ch, 1, 8) == "CHANNEL:" then
-    r, g, b = ChanNumColor(tonumber(string.sub(ch, 9)) or 1)
+    if customColorR >= 0 then
+      r, g, b = customColorR, customColorG, customColorB
+    else
+      r, g, b = ChanNumColor(tonumber(string.sub(ch, 9)) or 1)
+    end
   else
     local ci = ChatTypeInfo[CHAT_TYPE[ch]]
     r, g, b = ci and ci.r, ci and ci.g, ci and ci.b
@@ -444,7 +453,11 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
         end
         -- 译文显示行：标识统一紧贴正文前方（[chanLabel] [sender]： [译] 译文）
         if tr ~= "" and (tr == otxt or tr == p.text) and not p.suppressed then
-          -- skip
+          -- skip（未压制：原文已自然显示）
+        elseif tr ~= "" and (tr == otxt or tr == p.text) then
+          -- 译文=原文（该频道被过滤/控制台放行原文）且原文已压制：
+          -- 按纯原文回显，不带 [译] 前缀——否则看起来像"还在被翻译"
+          EchoOriginal(p)
         else
           local line = ""
           if p.chanLabel ~= "" then line = p.chanLabel .. " " end
@@ -552,38 +565,41 @@ SendChatMessage = function(msg, chatType, language, channel)
 end
 
 -- 横幅：延迟到 PLAYER_ENTERING_WORLD + 1s 显示（加载屏阶段写入会被清掉）
-local bannerShown = false
+local bannerPrints = 0
 local bannerFrame = CreateFrame("Frame")
 bannerFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 local function BannerPrint()
-  if bannerShown then return end
-  bannerShown = true
+  if bannerPrints >= 2 then return end
+  bannerPrints = bannerPrints + 1
   if DEFAULT_CHAT_FRAME then
-    DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.2.1 by ijnokmsc (driver v47, mode=" ..
+    DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.2.1 by ijnokmsc (driver v48, mode=" ..
       displayMode .. ", outgoing=" .. outgoingMode .. ")")
   end
 end
+local pewFired = false
 bannerFrame:SetScript("OnEvent", function()
-  if bannerShown then return end
-  bannerShown = true
-  local acc = 0
-  bannerFrame:SetScript("OnUpdate", function(self, el)
-    acc = acc + el
-    if acc < 1 then return end
-    self:SetScript("OnUpdate", nil)
-    BannerPrint()
-  end)
+  pewFired = true
 end)
--- v43 兜底：驱动加载晚于 PLAYER_ENTERING_WORLD 时（注入等浅栈窗口有秒级波动），
--- PEW 事件已错过、横幅永远不显示 → 加载 12 秒后仍未显示则强制打印
--- （此时加载屏必然已结束；正常路径 PEW+1s 先行，bannerShown 拦住重复）。
+-- v48 横幅时序修复：旧实现 PEW 一触发就置 bannerShown，v43 的 12s 兜底
+-- 被 bannerShown 拦死——PEW+1s 的打印若发生在加载屏/EUI 重建期间被清掉，
+-- 横幅就永久丢失（翻译正常但看不到横幅的根因）。
+-- 新时序：单一 OnUpdate 双阶段——进世界后 1s 打第一遍；12s 时若尚未打满
+-- 2 次则补打一遍（第一遍被吞时必然补上；最多 2 条，防刷屏）。
 do
   local acc = 0
   bannerFrame:SetScript("OnUpdate", function(self, el)
     acc = acc + el
-    if acc < 12 then return end
-    self:SetScript("OnUpdate", nil)
-    BannerPrint()
+    if bannerPrints >= 2 then
+      self:SetScript("OnUpdate", nil)
+      return
+    end
+    if pewFired and acc >= 1 and bannerPrints == 0 then
+      BannerPrint()
+    end
+    if acc >= 12 then
+      BannerPrint()
+      self:SetScript("OnUpdate", nil)
+    end
   end)
 end
 

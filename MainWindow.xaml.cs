@@ -143,6 +143,10 @@ public partial class MainWindow : Window
                      System.IO.Path.Combine(AppContext.BaseDirectory, "assets", "direct-dll")))
             Log(l);
         if (ValidateGameDir(true)) AutoDeployTrackB();
+        // -Debug 时把 log=true 同步进游戏目录 json（已部署也会被启动同步跳过 json 更新），
+        // 否则 DLL 日志永远开不了，排错无门
+        if (App.DebugMode)
+            Dispatcher.BeginInvoke(new Action(SyncDirectConfigToGameDir), DispatcherPriority.Background);
 
         if (_cfg.AutoStartLlama || _cfg.ProxyAutoStart)
             Dispatcher.BeginInvoke(new Action(() =>
@@ -225,6 +229,7 @@ public partial class MainWindow : Window
             if (int.TryParse(part.Trim(), out var v)) synthNums.Add(v);
         for (var i = 1; i <= 10; i++)
             ((System.Windows.Controls.CheckBox)FindName("ChkChanSynth" + i))!.IsChecked = synthNums.Contains(i);
+        UpdateChanColorSwatch();
         ChkChanSay.IsChecked = _cfg.ChannelSay;
         ChkChanYell.IsChecked = _cfg.ChannelYell;
         ChkChanWhisper.IsChecked = _cfg.ChannelWhisper;
@@ -420,7 +425,8 @@ public partial class MainWindow : Window
                             _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix, _cfg.DirectOutgoingMode,
                             dllLog: App.DebugMode,
                             outFilter: _cfg.OutgoingFilterRules,
-                            outOff: _cfg.DirectOutgoingOffChannels);
+                            outOff: _cfg.DirectOutgoingOffChannels,
+                            customColor: _cfg.CustomChannelColor);
                         Log("已同步游戏目录 WoWTranslateDirect.json——游戏内 /reload 或重启游戏生效");
                     }
                 }
@@ -476,6 +482,39 @@ public partial class MainWindow : Window
         _cfg.ChannelWorld = ChkChanWorld.IsChecked == true;
         _cfg.ChannelUntagged = ChkChanUntagged.IsChecked == true;
         _cfg.Save();
+    }
+
+    // ==================== 综合译文颜色（v48） ====================
+
+    private static System.Windows.Media.Color ParseChanColor(string? hex)
+    {
+        if (Core.DllSwitcher.TryParseHexColor(hex, out var r, out var g, out var b) &&
+            r >= 0 && g >= 0 && b >= 0)
+            return System.Windows.Media.Color.FromRgb((byte)(r * 255), (byte)(g * 255), (byte)(b * 255));
+        return System.Windows.Media.Color.FromRgb(0x88, 0x88, 0x88);
+    }
+
+    private void UpdateChanColorSwatch()
+        => ChanColorSwatch.Background = new System.Windows.Media.SolidColorBrush(ParseChanColor(_cfg.CustomChannelColor));
+
+    private void BtnChanColor_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new System.Windows.Forms.ColorDialog { FullOpen = true };
+        if (dlg.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
+        _cfg.CustomChannelColor = $"#{dlg.Color.R:X2}{dlg.Color.G:X2}{dlg.Color.B:X2}";
+        _cfg.Save();
+        UpdateChanColorSwatch();
+        SyncDirectConfigToGameDir();
+        Log($"综合频道译文颜色已设置为 {_cfg.CustomChannelColor}（游戏内 /reload 生效）");
+    }
+
+    private void BtnChanColorReset_Click(object sender, RoutedEventArgs e)
+    {
+        _cfg.CustomChannelColor = "";
+        _cfg.Save();
+        UpdateChanColorSwatch();
+        SyncDirectConfigToGameDir();
+        Log("综合频道译文颜色已恢复按编号配色（游戏内 /reload 生效）");
     }
 
 
@@ -1079,7 +1118,8 @@ public partial class MainWindow : Window
                     _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix, _cfg.DirectOutgoingMode,
                     dllLog: App.DebugMode,
                     outFilter: _cfg.OutgoingFilterRules,
-                    outOff: _cfg.DirectOutgoingOffChannels);
+                    outOff: _cfg.DirectOutgoingOffChannels,
+                    customColor: _cfg.CustomChannelColor);
                 Log($"已更新游戏目录 WoWTranslateDirect.json（displayMode={_cfg.DirectDisplayMode}，outgoing={_cfg.DirectOutgoingMode}，log={App.DebugMode}，游戏内 /reload 生效）");
             }
         }
@@ -1194,7 +1234,8 @@ public partial class MainWindow : Window
             var lines = Core.DllSwitcher.EnsureDeployed(gameDir, assets,
                 _cfg.DirectDisplayMode, _cfg.DirectDisplayPrefix, _cfg.DirectOutgoingMode,
                 listenPort: _cfg.ListenPort, dllLog: App.DebugMode,
-                outFilter: _cfg.OutgoingFilterRules, outOff: _cfg.DirectOutgoingOffChannels);
+                outFilter: _cfg.OutgoingFilterRules, outOff: _cfg.DirectOutgoingOffChannels,
+                customColor: _cfg.CustomChannelColor);
             foreach (var l in lines) Log(l);
             RefreshDllStatus();
         }

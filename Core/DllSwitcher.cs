@@ -94,13 +94,32 @@ public sealed class DllSwitcher
     /// endpoint 指向控制台伪装 OpenAI 端点，displayMode/displayPrefix 由内嵌驱动 Lua 消费。
     /// UTF-8 无 BOM（DLL 侧 nlohmann::json 不认 BOM）。
     /// </summary>
+    /// <summary>"#RRGGBB" → 0-1 RGB；空/非法返回 false。</summary>
+    public static bool TryParseHexColor(string? hex, out double r, out double g, out double b)
+    {
+        r = g = b = -1;
+        var h = (hex ?? "").Trim();
+        if (h.Length != 7 || h[0] != '#') return false;
+        if (!byte.TryParse(h[1..3], System.Globalization.NumberStyles.HexNumber, null, out var rr) ||
+            !byte.TryParse(h[3..5], System.Globalization.NumberStyles.HexNumber, null, out var gg) ||
+            !byte.TryParse(h[5..7], System.Globalization.NumberStyles.HexNumber, null, out var bb))
+            return false;
+        r = rr / 255.0; g = gg / 255.0; b = bb / 255.0;
+        return true;
+    }
+
     public static string WriteDirectConfig(string gameDir, int listenPort,
         string displayMode, string displayPrefix, string outgoingMode = "off",
-        bool dllLog = false, string outFilter = "", string outOff = "")
+        bool dllLog = false, string outFilter = "", string outOff = "",
+        string customColor = "")
     {
         if (displayMode != "replace" && displayMode != "both") displayMode = "replace";
         if (outgoingMode != "off" && outgoingMode != "replace" && outgoingMode != "both")
             outgoingMode = "off";
+        var hasColor = TryParseHexColor(customColor, out var cr, out var cg, out var cb);
+        string Num(double v) => hasColor
+            ? v.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : "-1";
         var json =
             "{\n" +
             "  \"provider\": \"openai\",\n" +
@@ -112,7 +131,10 @@ public sealed class DllSwitcher
             $"  \"outgoingMode\": \"{outgoingMode}\",\n" +
             $"  \"outFilter\": \"{EscapeJson(outFilter ?? "")}\",\n" +
             $"  \"outOff\": \"{EscapeJson(outOff ?? "")}\",\n" +
-            $"  \"log\": {(dllLog ? "true" : "false")}\n" +
+            $"  \"log\": {(dllLog ? "true" : "false")},\n" +
+            $"  \"customR\": {Num(cr)},\n" +
+            $"  \"customG\": {Num(cg)},\n" +
+            $"  \"customB\": {Num(cb)}\n" +
             "}\n";
         var path = Path.Combine(gameDir, "WoWTranslateDirect.json");
         File.WriteAllText(path, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
@@ -160,7 +182,8 @@ public sealed class DllSwitcher
         string outgoingMode = "off",
         bool dllLog = false,
         string outFilter = "",
-        string outOff = "")
+        string outOff = "",
+        string customColor = "")
     {
         var lines = new List<string>();
         try
@@ -251,7 +274,7 @@ public sealed class DllSwitcher
     public static List<string> EnsureDeployed(string gameDir, string directAssetsDir,
         string displayMode, string displayPrefix, string outgoingMode,
         int listenPort = 8080, Func<bool>? wowRunning = null, bool dllLog = false,
-        string outFilter = "", string outOff = "")
+        string outFilter = "", string outOff = "", string customColor = "")
     {
         var status = Probe(gameDir, directAssetsDir);
         if (status.Current == TrackDirect)
@@ -270,7 +293,7 @@ public sealed class DllSwitcher
         }
         lines.Add("ℹ 未检测到 Direct DLL，正在自动部署…");
         lines.AddRange(DeployDirect(gameDir, directAssetsDir, wowRunning,
-            listenPort, displayMode, displayPrefix, outgoingMode, dllLog, outFilter, outOff));
+            listenPort, displayMode, displayPrefix, outgoingMode, dllLog, outFilter, outOff, customColor));
         return lines;
     }
 

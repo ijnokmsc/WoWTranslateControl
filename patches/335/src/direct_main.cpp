@@ -596,8 +596,19 @@ static std::string g_outOff;                      // v41 外发禁用频道（�
 static std::string g_driverChunk;                 // 配置前缀 + 驱动 Lua，RebuildDriverChunk 组装
 static HMODULE g_hSelfModule = NULL;              // 引擎自身句柄（DllMain 传入；日志/配置路径用）
 
+static double g_customColorR = -1.0;
+static double g_customColorG = -1.0;
+static double g_customColorB = -1.0;
+
 static void ApplyDisplayKeys(const json& disp)
 {
+    if (disp.contains("customR") && disp["customR"].is_number())
+        g_customColorR = (std::max)(-1.0, (std::min)(1.0, disp["customR"].get<double>()));
+    if (disp.contains("customG") && disp["customG"].is_number())
+        g_customColorG = (std::max)(-1.0, (std::min)(1.0, disp["customG"].get<double>()));
+    if (disp.contains("customB") && disp["customB"].is_number())
+        g_customColorB = (std::max)(-1.0, (std::min)(1.0, disp["customB"].get<double>()));
+
     if (disp.contains("displayMode") && disp["displayMode"].is_string())
         g_displayMode = disp["displayMode"].get<std::string>();
     if (disp.contains("displayPrefix") && disp["displayPrefix"].is_string())
@@ -627,14 +638,17 @@ static void RebuildDriverChunk()
     const char* part4 = "',outTimeout=";
     const char* part5 = ",outfilter='";   // v41 免翻译前缀规则（LuaEscape 可转义多行）
     const char* part6 = "',outoff='";
-    const char* part7 = "'}\n";
+    const char* part7 = "',customR=";
     g_driverChunk = std::string(part1) + wt::LuaEscape(g_displayMode) +
                     part2 + wt::LuaEscape(g_displayPrefix) +
                     part3 + wt::LuaEscape(g_outgoingMode) +
                     part4 + std::to_string(g_outTimeout) +
                     part5 + wt::LuaEscape(g_outFilter) +
                     part6 + wt::LuaEscape(g_outOff) +
-                    part7 +
+                    part7 + std::to_string(g_customColorR) +
+                    ",customG=" + std::to_string(g_customColorG) +
+                    ",customB=" + std::to_string(g_customColorB) +
+                    "'}\n" +
                     wt::DriverLuaCode();
 }
 

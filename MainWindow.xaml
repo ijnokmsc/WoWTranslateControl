@@ -226,6 +226,16 @@
                                 <CheckBox x:Name="ChkChanSynth10" Content="10" Checked="Channel_Changed" Unchecked="Channel_Changed" />
                             </UniformGrid>
 
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                <Button x:Name="BtnChanColor" Content="综合译文颜色…" Padding="8,3"
+                                        Click="BtnChanColor_Click"
+                                        ToolTip="自定义编号频道（综合/世界等）译文颜色；不设置则按编号自动配色" />
+                                <Border x:Name="ChanColorSwatch" Width="18" Height="18" CornerRadius="3"
+                                        Margin="6,0,0,0" Background="#FF888888" VerticalAlignment="Center" />
+                                <Button x:Name="BtnChanColorReset" Content="按编号配色" Margin="6,0,0,0"
+                                        Padding="8,3" Click="BtnChanColorReset_Click" />
+                            </StackPanel>
+
                             <TextBlock Style="{StaticResource Dim}" Margin="0,4,0,0"
                                        TextWrapping="Wrap"
                                        Text="开关变更即时生效。" />
