@@ -207,8 +207,24 @@
                                 <CheckBox x:Name="ChkChanGuild" Content="公会" />
                                 <CheckBox x:Name="ChkChanRaid" Content="团队" />
                                 <CheckBox x:Name="ChkChanBg" Content="战场" />
-                                <CheckBox x:Name="ChkChanWorld" Content="世界/本地" />
+                                <CheckBox x:Name="ChkChanWorld" Content="其他自定义" />
                                 <CheckBox x:Name="ChkChanUntagged" Content="未标记" />
+                            </UniformGrid>
+                            <UniformGrid Columns="2" Margin="0,2,0,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <CheckBox x:Name="ChkChanSynth" Content="综合(含世界) 编号"
+                                              Checked="Channel_Changed" Unchecked="Channel_Changed"
+                                              ToolTip="自定义频道按编号归类：综合、WorldChat 等综合类频道的编号" />
+                                    <TextBox x:Name="TxtChanSynthNums" Width="46" Margin="4,0,0,0"
+                                             Text="2,7" LostFocus="TxtChanNums_LostFocus" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <CheckBox x:Name="ChkChanLocal" Content="本地防务 编号"
+                                              Checked="Channel_Changed" Unchecked="Channel_Changed"
+                                              ToolTip="本地防务类自定义频道的编号" />
+                                    <TextBox x:Name="TxtChanLocalNums" Width="36" Margin="4,0,0,0"
+                                             Text="4" LostFocus="TxtChanNums_LostFocus" />
+                                </StackPanel>
                             </UniformGrid>
                             <TextBlock Style="{StaticResource Dim}" Margin="0,4,0,0"
                                        TextWrapping="Wrap"

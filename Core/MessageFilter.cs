@@ -25,7 +25,7 @@ public static class MessageFilter
     // ---- 频道标签：插件 Lua 补丁在文本前加 \1<频道>\1，控制台无条件剥离并据此过滤 ----
     // [A-Z0-9_]：v24 外发翻译用 ZH2EN 作频道名，含数字
     private static readonly Regex ReChannelTag =
-        new(@"^\x01([A-Z0-9_]+)\x01", RegexOptions.Compiled);
+        new(@"^\x01([A-Z0-9_:]+)\x01", RegexOptions.Compiled);
 
     /// <summary>
     /// 解析并剥离频道标签前缀（\1CH\1）。无论频道过滤开关与否都必须剥离——
@@ -60,6 +60,25 @@ public static class MessageFilter
                 "请求无频道标签（旧版 Lua 或外发翻译），按未标记频道规则跳过");
         }
 
+        // 自定义频道按编号归类（v46 驱动上报 CHANNEL:编号）：综合（含世界）/
+        // 本地防务/其他自定义。无编号的旧式 CHANNEL 归其他自定义。
+        if (channel.StartsWith("CHANNEL", StringComparison.Ordinal))
+        {
+            var numText = channel.Length > 7 ? channel[8..] : "";
+            var hasNum = int.TryParse(numText, out var num);
+            if (hasNum && NumListContains(cfg.ChannelSynthNums, num))
+                return cfg.ChannelSynth ? null : new FilterDecision(
+                    true, "C9", "综合频道关闭",
+                    $"自定义频道 {num}（综合/世界）已禁用翻译，直接回显原文");
+            if (hasNum && NumListContains(cfg.ChannelLocalNums, num))
+                return cfg.ChannelLocal ? null : new FilterDecision(
+                    true, "C10", "本地防务频道关闭",
+                    $"自定义频道 {num}（本地防务）已禁用翻译，直接回显原文");
+            return cfg.ChannelWorld ? null : new FilterDecision(
+                true, "C8", "其他自定义频道关闭",
+                $"自定义频道 {(numText == "" ? "(未识别编号)" : numText)} 已禁用翻译，直接回显原文");
+        }
+
         foreach (var (ruleId, wowName, cnName, cfgKey) in AppConfig.ChannelCatalog)
         {
             if (ruleId == "C0" || wowName != channel) continue;
@@ -82,6 +101,14 @@ public static class MessageFilter
 
         // 未知频道名（插件新增事件映射）默认放行，交内容规则处理
         return null;
+    }
+
+    /// <summary>"2,7" 式编号列表是否包含 n（中英文逗号均可，容忍空白）。</summary>
+    private static bool NumListContains(string list, int n)
+    {
+        foreach (var part in (list ?? "").Split(',', '，'))
+            if (int.TryParse(part.Trim(), out var v) && v == n) return true;
+        return false;
     }
 
     /// <summary>

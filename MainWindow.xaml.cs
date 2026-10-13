@@ -24,7 +24,25 @@ public sealed class TrafficRow
     /// <summary>聊天频道名（GUILD/SAY…）；null = 无频道标签的系统播报。</summary>
     public string? Channel { get; init; }
     /// <summary>频道显示文本（频道列绑定用；无标签显示 -，空白单元格会被误读为功能失效）。</summary>
-    public string ChannelText => string.IsNullOrEmpty(Channel) ? "-" : Channel;
+    public string ChannelText
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(Channel)) return "-";
+            if (Channel == "ZH2EN") return "外发";
+            if (Channel.StartsWith("CHANNEL"))
+            {
+                var n = Channel.Length > 7 ? Channel[8..] : "";
+                return string.IsNullOrEmpty(n) ? "自定义" : $"自定义{n}";
+            }
+            return Channel switch
+            {
+                "SAY" => "综合", "YELL" => "喊话", "WHISPER" => "密语",
+                "PARTY" => "队伍", "GUILD" => "公会", "RAID" => "团队",
+                "BATTLEGROUND" => "战场", _ => Channel
+            };
+        }
+    }
 }
 
 public partial class MainWindow : Window
@@ -201,6 +219,10 @@ public partial class MainWindow : Window
 
         // 频道过滤
         ChkChanEnabled.IsChecked = _cfg.ChannelFilterEnabled;
+        ChkChanSynth.IsChecked = _cfg.ChannelSynth;
+        ChkChanLocal.IsChecked = _cfg.ChannelLocal;
+        TxtChanSynthNums.Text = _cfg.ChannelSynthNums;
+        TxtChanLocalNums.Text = _cfg.ChannelLocalNums;
         ChkChanSay.IsChecked = _cfg.ChannelSay;
         ChkChanYell.IsChecked = _cfg.ChannelYell;
         ChkChanWhisper.IsChecked = _cfg.ChannelWhisper;
@@ -436,6 +458,8 @@ public partial class MainWindow : Window
     {
         if (!IsLoaded) return;
         _cfg.ChannelFilterEnabled = ChkChanEnabled.IsChecked == true;
+        _cfg.ChannelSynth = ChkChanSynth.IsChecked == true;
+        _cfg.ChannelLocal = ChkChanLocal.IsChecked == true;
         _cfg.ChannelSay = ChkChanSay.IsChecked == true;
         _cfg.ChannelYell = ChkChanYell.IsChecked == true;
         _cfg.ChannelWhisper = ChkChanWhisper.IsChecked == true;
@@ -446,6 +470,17 @@ public partial class MainWindow : Window
         _cfg.ChannelWorld = ChkChanWorld.IsChecked == true;
         _cfg.ChannelUntagged = ChkChanUntagged.IsChecked == true;
         _cfg.Save();
+    }
+
+    private void TxtChanNums_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        _cfg.ChannelSynthNums = string.IsNullOrWhiteSpace(TxtChanSynthNums.Text) ? "2,7" : TxtChanSynthNums.Text.Trim();
+        _cfg.ChannelLocalNums = string.IsNullOrWhiteSpace(TxtChanLocalNums.Text) ? "4" : TxtChanLocalNums.Text.Trim();
+        TxtChanSynthNums.Text = _cfg.ChannelSynthNums;
+        TxtChanLocalNums.Text = _cfg.ChannelLocalNums;
+        _cfg.Save();
+        Log($"自定义频道编号已更新：综合(含世界) {_cfg.ChannelSynthNums}，本地防务 {_cfg.ChannelLocalNums}（即时生效）");
     }
 
     // ==================== 翻译服务（Provider） ====================

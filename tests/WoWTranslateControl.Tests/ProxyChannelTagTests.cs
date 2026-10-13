@@ -62,4 +62,37 @@ public class ProxyChannelTagTests
         Assert.NotNull(entry);
         Assert.Equal("GUILD", entry!.Channel);
     }
+
+    [Fact]
+    public async Task NumberedChannelRoutesToSynthCategory()
+    {
+        // CHANNEL:2 综合（含世界）：默认开启 → 放行，频道编号原样随行
+        var cfg = new AppConfig { ListenPort = 18445, CacheEnabled = false };
+        var entry = await PostOnceAsync(cfg, "\u0001CHANNEL:2\u0001world chat message");
+        Assert.NotNull(entry);
+        Assert.Equal("CHANNEL:2", entry!.Channel);
+    }
+
+    [Fact]
+    public async Task NumberedChannelSynthDisabledBlocks()
+    {
+        // 取消勾选综合(含世界) → CHANNEL:2 被 C9 规则拦截
+        var cfg = new AppConfig { ListenPort = 18446, CacheEnabled = false, ChannelSynth = false };
+        var entry = await PostOnceAsync(cfg, "\u0001CHANNEL:2\u0001world chat message");
+        Assert.NotNull(entry);
+        Assert.Equal(TrafficKind.Filtered, entry!.Kind);
+        Assert.Equal("C9", entry.RuleId);
+        Assert.Equal("CHANNEL:2", entry.Channel);
+    }
+
+    [Fact]
+    public async Task NumberedChannelLocalDisabledBlocks()
+    {
+        // 取消勾选本地防务 → CHANNEL:4 被 C10 规则拦截
+        var cfg = new AppConfig { ListenPort = 18447, CacheEnabled = false, ChannelLocal = false };
+        var entry = await PostOnceAsync(cfg, "\u0001CHANNEL:4\u0001local defense call");
+        Assert.NotNull(entry);
+        Assert.Equal(TrafficKind.Filtered, entry!.Kind);
+        Assert.Equal("C10", entry.RuleId);
+    }
 }

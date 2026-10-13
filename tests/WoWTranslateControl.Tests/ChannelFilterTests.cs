@@ -155,4 +155,43 @@ public class ChannelFilterTests
         Assert.Equal("llama-local", mgr2.PrimaryId);
         Assert.True(mgr2.NeedsLlama);   // 条目被删 → 回落本地 llama
     }
+
+    [Fact]
+    public void NumberedCustomChannelsRouteByConfig()
+    {
+        var cfg = new WoWTranslateControl.Models.AppConfig
+        {
+            ChannelFilterEnabled = true,
+            ChannelSynthNums = "2,7",
+            ChannelLocalNums = "4",
+        };
+
+        // 综合（含世界）
+        Assert.Null(WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:2", cfg));
+        Assert.Null(WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:7", cfg));
+        cfg.ChannelSynth = false;
+        Assert.Equal("C9", WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:2", cfg)!.RuleId);
+        Assert.Equal("C9", WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:7", cfg)!.RuleId);
+
+        // 本地防务
+        cfg.ChannelSynth = true;
+        Assert.Null(WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:4", cfg));
+        cfg.ChannelLocal = false;
+        Assert.Equal("C10", WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:4", cfg)!.RuleId);
+
+        // 其他自定义编号 → C8 开关；旧式无编号 CHANNEL 同样归 C8
+        cfg.ChannelLocal = true;
+        Assert.Null(WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:3", cfg));
+        Assert.Null(WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL", cfg));
+        cfg.ChannelWorld = false;
+        Assert.Equal("C8", WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:3", cfg)!.RuleId);
+        Assert.Equal("C8", WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL", cfg)!.RuleId);
+
+        // 编号列表可改：本地编号改为 6 后，CHANNEL:6 归本地、CHANNEL:4 归其他
+        cfg.ChannelWorld = true;
+        cfg.ChannelLocalNums = "6";
+        cfg.ChannelLocal = false;
+        Assert.Equal("C10", WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:6", cfg)!.RuleId);
+        Assert.Null(WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:4", cfg));
+    }
 }

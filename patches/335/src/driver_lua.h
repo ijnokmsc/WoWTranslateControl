@@ -257,6 +257,15 @@ local function ChanLabel(ch, ...)
   return CHAN_CN[ch] or ""
 end
 
+-- v46：自定义频道按编号上报（CHANNEL:编号）——控制台据此归类
+-- （综合含世界 / 本地防务 / 其他自定义），编号取自频道名前缀（如 "2. 综合"）
+local function ChannelTag(ch, ...)
+  if ch ~= "CHANNEL" then return ch end
+  local nm = select(2, ...)
+  local num = nm and string.match(tostring(nm), "^(%d+)")
+  return num and ("CHANNEL:" .. num) or "CHANNEL"
+end
+
 -- 消息是否应送翻（频道已知 + 非空 + 非自己发言 + 非中文 + 非已译标识）
 -- 中文判定（编码无关）：任一字节 >= 0x81 即含 CJK（GBK 双字节首位/UTF-8 首字节均为高位）
 -- ——事件参数是纯正文（无头污染），该判定不再误伤"中文 ID 玩家的英文消息"
@@ -282,7 +291,7 @@ local suppressCount = 0
 local function WTCSuppressFilter(chatFrame, event, msg, sender, ...)
   local ch = ShouldTranslate(event, msg, sender)
   if not ch then return false end
-  TryCapture(ch, msg, sender, ChanLabel(ch, ...))
+  TryCapture(ChannelTag(ch, ...), msg, sender, ChanLabel(ch, ...))
   -- 仅 replace 模式压制原文；both 模式放行（原文照显，译文由轮询追加）
   if displayMode ~= "replace" then return false end
   -- queued 与 dup 统一处理：dup = 事件帧先入队（派发顺序竞争），条目已在
@@ -336,7 +345,7 @@ ef:SetScript("OnEvent", function(self, event, msg, sender, ...)
 
   -- 过滤器已捕获过的（60s 窗口）→ 跳过
   if SeenCheck(ch, tostring(sender or ""), msg) then return end
-  TryCapture(ch, msg, sender, ChanLabel(ch, ...))
+  TryCapture(ChannelTag(ch, ...), msg, sender, ChanLabel(ch, ...))
 end)
 
 -- v33 探针：包装前 3 个聊天框的 OnEvent 脚本（EUI/巨龙UI 若替换了脚本，
@@ -531,7 +540,7 @@ local function BannerPrint()
   if bannerShown then return end
   bannerShown = true
   if DEFAULT_CHAT_FRAME then
-    DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.1.1 by ijnokmsc (driver v45, mode=" ..
+    DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.2.2 by ijnokmsc (driver v46, mode=" ..
       displayMode .. ", outgoing=" .. outgoingMode .. ")")
   end
 end
