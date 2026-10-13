@@ -196,7 +196,7 @@
                                        Style="{StaticResource CardTitle}" />
                             <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,6"
                                        TextWrapping="Wrap"
-                                       Text="取消勾选的频道直接回显原文、不进模型。频道标签由插件 Lua 补丁以 \1频道\1 前缀搭车上报（DLL 原生 API 不传频道）。" />
+                                       Text="取消勾选的频道直接回显原文、不进模型。频道标签由驱动 Lua 以 \1频道\1 前缀随消息上报（实时流量视图的「频道」列可核对每条消息的来源）。" />
                             <CheckBox x:Name="ChkChanEnabled" Content="启用频道过滤"
                                       Checked="Channel_Changed" Unchecked="Channel_Changed" />
                             <UniformGrid Columns="3" Margin="0,2,0,0">
@@ -511,6 +511,7 @@
                                         <Style TargetType="TextBlock" BasedOn="{StaticResource RuleChip}" />
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
+                                <DataGridTextColumn Header="频道" Binding="{Binding ChannelText}" Width="72" />
                                 <DataGridTextColumn Header="分类" Binding="{Binding RuleName}" Width="120" />
                                 <DataGridTextColumn Header="耗时ms" Binding="{Binding ElapsedMs}" Width="66" />
                                 <DataGridTextColumn Header="消息内容" Binding="{Binding Content}" Width="*" />

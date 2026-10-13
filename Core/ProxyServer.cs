@@ -33,7 +33,11 @@ public sealed record TrafficEntry(
     string RuleName,
     string Content,
     int ElapsedMs,
-    string? Channel = null);
+    string? Channel = null)
+{
+    /// <summary>频道显示文本：驱动标签原值（SAY/CHANNEL…），无标签显示 -。</summary>
+    public string ChannelText => string.IsNullOrEmpty(Channel) ? "-" : Channel;
+}
 
 /// <summary>
 /// 本地翻译代理（v2：管线驱动）。
@@ -356,7 +360,7 @@ public sealed class ProxyServer : IDisposable
             if (result.Kind == TrafficKind.CacheHit) Interlocked.Increment(ref CacheHitCount);
             else Interlocked.Increment(ref FilteredCount);
 
-            Emit(result.Kind, result.RuleId, result.RuleName, result.Content, sw);
+            Emit(result.Kind, result.RuleId, result.RuleName, result.Content, sw, ctx.Channel);
             var resp = BuildOpenAiResponse(result.Content);
             await SendAsync(stream, 200, resp, keepAlive, ct).ConfigureAwait(false);
             return;
@@ -377,7 +381,7 @@ public sealed class ProxyServer : IDisposable
             var (restored, _) = GlossaryApplier.Restore(reply.Translated, ctx.GlossaryMap);
             finalText = string.IsNullOrEmpty(restored) ? ctx.OriginalText : restored;
             kind = TrafficKind.Model;
-            ruleId = "-";
+            ruleId = "模型";
             ruleName = "模型翻译";
             _cacheStage.Put(ctx, finalText);
             Interlocked.Increment(ref ModelCount);
