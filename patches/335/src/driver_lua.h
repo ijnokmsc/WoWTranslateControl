@@ -228,10 +228,16 @@ local function TryCapture(ch, msg, sender, chanLabel)
   end
   counter = counter + 1
   local mid = "m" .. counter
-  local ci = ChatTypeInfo[CHAT_TYPE[ch]]
+  local r, g, b
+  if string.sub(ch, 1, 8) == "CHANNEL:" then
+    r, g, b = ChanNumColor(tonumber(string.sub(ch, 9)) or 1)
+  else
+    local ci = ChatTypeInfo[CHAT_TYPE[ch]]
+    r, g, b = ci and ci.r, ci and ci.g, ci and ci.b
+  end
   pending[mid] = { sender = tostring(sender or ""), text = msg,
                    chanLabel = chanLabel or "", suppressed = false,
-                   r = ci and ci.r, g = ci and ci.g, b = ci and ci.b,
+                   r = r, g = g, b = b,
                    t = GetTime(), done = false }
   local ok = pcall(function()
     local rr = WoWTranslate_Translate("\1" .. ch .. "\1" .. msg, "en", "zh", mid)
@@ -264,6 +270,18 @@ local function ChannelTag(ch, ...)
   local nm = select(2, ...)
   local num = nm and string.match(tostring(nm), "^(%d+)")
   return num and ("CHANNEL:" .. num) or "CHANNEL"
+end
+
+-- v47：自定义频道按编号取色——ChatTypeInfo.CHANNEL 是所有自定义频道共用
+-- 的一个颜色，CHANNEL:n 编号查表得 nil 后全部回退白色，综合/本地无法区分。
+-- 编号 1-10 各配一色（深色聊天背景可读），超出按 10 取模循环。
+local CHAN_NUM_COLORS = {
+  {1, .72, .35}, {.55, 1, .55}, {.45, .75, 1}, {1, .55, .55}, {1, .9, .4},
+  {.7, .6, 1}, {.4, 1, .9}, {1, .6, .85}, {.85, .85, .5}, {.6, .85, 1},
+}
+local function ChanNumColor(num)
+  local c = CHAN_NUM_COLORS[((num - 1) % #CHAN_NUM_COLORS) + 1]
+  return c[1], c[2], c[3]
 end
 
 -- 消息是否应送翻（频道已知 + 非空 + 非自己发言 + 非中文 + 非已译标识）
@@ -540,7 +558,7 @@ local function BannerPrint()
   if bannerShown then return end
   bannerShown = true
   if DEFAULT_CHAT_FRAME then
-    DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.2.2 by ijnokmsc (driver v46, mode=" ..
+    DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.2.2 by ijnokmsc (driver v47, mode=" ..
       displayMode .. ", outgoing=" .. outgoingMode .. ")")
   end
 end

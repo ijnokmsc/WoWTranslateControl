@@ -169,7 +169,7 @@ public sealed class AppConfig
     [JsonIgnore]
     public static readonly (string RuleId, string WowName, string CnName, string CfgKey)[] ChannelCatalog =
     {
-        ("C1", "SAY",         "综合",      "ChannelSay"),
+        ("C1", "SAY",         "本地",      "ChannelSay"),
         ("C2", "YELL",        "喊话",      "ChannelYell"),
         ("C3", "WHISPER",     "密语",      "ChannelWhisper"),
         ("C4", "PARTY",       "队伍",      "ChannelParty"),

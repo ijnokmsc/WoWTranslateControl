@@ -37,7 +37,7 @@ public sealed class TrafficRow
             }
             return Channel switch
             {
-                "SAY" => "综合", "YELL" => "喊话", "WHISPER" => "密语",
+                "SAY" => "本地", "YELL" => "喊话", "WHISPER" => "密语",
                 "PARTY" => "队伍", "GUILD" => "公会", "RAID" => "团队",
                 "BATTLEGROUND" => "战场", _ => Channel
             };
@@ -221,7 +221,11 @@ public partial class MainWindow : Window
         ChkChanEnabled.IsChecked = _cfg.ChannelFilterEnabled;
         ChkChanSynth.IsChecked = _cfg.ChannelSynth;
         ChkChanLocal.IsChecked = _cfg.ChannelLocal;
-        TxtChanSynthNums.Text = _cfg.ChannelSynthNums;
+        var synthNums = new HashSet<int>();
+        foreach (var part in (_cfg.ChannelSynthNums ?? "").Split(',', '，'))
+            if (int.TryParse(part.Trim(), out var v)) synthNums.Add(v);
+        for (var i = 1; i <= 10; i++)
+            ((System.Windows.Controls.CheckBox)FindName("ChkChanSynth" + i))!.IsChecked = synthNums.Contains(i);
         TxtChanLocalNums.Text = _cfg.ChannelLocalNums;
         ChkChanSay.IsChecked = _cfg.ChannelSay;
         ChkChanYell.IsChecked = _cfg.ChannelYell;
@@ -460,6 +464,11 @@ public partial class MainWindow : Window
         _cfg.ChannelFilterEnabled = ChkChanEnabled.IsChecked == true;
         _cfg.ChannelSynth = ChkChanSynth.IsChecked == true;
         _cfg.ChannelLocal = ChkChanLocal.IsChecked == true;
+        var nums = new List<int>();
+        for (var i = 1; i <= 10; i++)
+            if (((System.Windows.Controls.CheckBox)FindName("ChkChanSynth" + i))?.IsChecked == true)
+                nums.Add(i);
+        _cfg.ChannelSynthNums = nums.Count == 0 ? "" : string.Join(",", nums);
         _cfg.ChannelSay = ChkChanSay.IsChecked == true;
         _cfg.ChannelYell = ChkChanYell.IsChecked == true;
         _cfg.ChannelWhisper = ChkChanWhisper.IsChecked == true;
@@ -472,15 +481,13 @@ public partial class MainWindow : Window
         _cfg.Save();
     }
 
-    private void TxtChanNums_LostFocus(object sender, RoutedEventArgs e)
+    private void TxtChanLocalNums_LostFocus(object sender, RoutedEventArgs e)
     {
         if (!IsLoaded) return;
-        _cfg.ChannelSynthNums = string.IsNullOrWhiteSpace(TxtChanSynthNums.Text) ? "2,7" : TxtChanSynthNums.Text.Trim();
         _cfg.ChannelLocalNums = string.IsNullOrWhiteSpace(TxtChanLocalNums.Text) ? "4" : TxtChanLocalNums.Text.Trim();
-        TxtChanSynthNums.Text = _cfg.ChannelSynthNums;
         TxtChanLocalNums.Text = _cfg.ChannelLocalNums;
         _cfg.Save();
-        Log($"自定义频道编号已更新：综合(含世界) {_cfg.ChannelSynthNums}，本地防务 {_cfg.ChannelLocalNums}（即时生效）");
+        Log($"本地防务频道编号已更新：{_cfg.ChannelLocalNums}（即时生效）");
     }
 
     // ==================== 翻译服务（Provider） ====================
