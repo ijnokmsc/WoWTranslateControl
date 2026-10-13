@@ -195,16 +195,10 @@ end
 -- 翻译失败/超时兜底：回显原文并重建头部（频道标签+玩家链接），不再只显正文
 local function EchoOriginal(p)
   local line = ""
-  local labelPart = ""
-  if p.chanLabel ~= "" then labelPart = p.chanLabel .. " " end
+  if p.chanLabel ~= "" then line = line .. p.chanLabel .. " " end
+  -- v49：原色模式整行走频道色（TryCapture 已按 customR 取好）；
+  -- 回显与译文同色，[译] 前缀的有无区分是否真的翻译了
   local lr, lg, lb = p.r or 1, p.g or 0.4, p.b or 0.4
-  -- v49：原色显示——自定义编号频道标签着色、正文白色
-  if p.tag and string.sub(p.tag, 1, 8) == "CHANNEL:" and customColorR == -2 then
-    labelPart = "|cff3fc1ff" .. labelPart .. "|r"
-    lr, lg, lb = 1, 1, 1
-  end
-  -- v48：回显与译文同色（同频道统一颜色，[译] 前缀的有无区分是否真的翻译了）
-  line = line .. labelPart
   if p.sender ~= "" then
     line = line .. "|Hplayer:" .. p.sender .. "|h[" .. p.sender .. "]|h： "
   end
@@ -256,12 +250,12 @@ local function TryCapture(ch, msg, sender, chanLabel)
   local mid = "m" .. counter
   local r, g, b
   if string.sub(ch, 1, 8) == "CHANNEL:" then
-    if customColorR == -2 then
-      r, g, b = 1, 1, 1   -- 原色显示：正文白色，频道标签由显示期着色
-    elseif customColorR >= 0 then
+    if customColorR >= 0 then
       r, g, b = customColorR, customColorG, customColorB
     else
-      r, g, b = ChanNumColor(tonumber(string.sub(ch, 9)) or 1)
+      -- 原色(-2)与按编号(-1)都以 ChatTypeInfo.CHANNEL 为准（经典频道黄）
+      local ci = ChatTypeInfo.CHANNEL
+      r, g, b = ci and ci.r or 1, ci and ci.g or .8, ci and ci.b or .5
     end
   else
     local ci = ChatTypeInfo[CHAT_TYPE[ch]]
@@ -472,17 +466,13 @@ pollFrame:SetScript("OnUpdate", function(self, elapsed)
           EchoOriginal(p)
         else
           local line = ""
-          local labelPart = ""
-          if p.chanLabel ~= "" then labelPart = p.chanLabel .. " " end
+          if p.chanLabel ~= "" then line = p.chanLabel .. " " end
           local lr, lg, lb = p.r, p.g, p.b
-          -- v49：原色显示——自定义编号频道标签着色、正文白色
-          if p.tag and string.sub(p.tag, 1, 8) == "CHANNEL:" and customColorR == -2 then
-            labelPart = "|cff3fc1ff" .. labelPart .. "|r"
-            lr, lg, lb = 1, 1, 1
-          elseif p.tag and string.sub(p.tag, 1, 8) == "CHANNEL:" and customColorR >= 0 then
+          -- v49：配置色（customR>=0）优先；原色/按编号在捕获时已取频道色
+          if p.tag and string.sub(p.tag, 1, 8) == "CHANNEL:" and customColorR >= 0 then
             lr, lg, lb = customColorR, customColorG, customColorB
           end
-          line = labelPart
+          line = line
           if p.sender ~= "" then
             line = line .. "|Hplayer:" .. p.sender .. "|h[" .. p.sender .. "]|h： "
           end

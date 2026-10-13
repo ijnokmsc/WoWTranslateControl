@@ -234,7 +234,7 @@
                                         Margin="6,0,0,0" Background="#FF888888" VerticalAlignment="Center" />
                                 <Button x:Name="BtnChanColorNative" Content="原色显示" Margin="6,0,0,0"
                                         Padding="8,3" Click="BtnChanColorNative_Click"
-                                        ToolTip="仿原生聊天配色：频道标签着色、正文白色" />
+                                        ToolTip="按频道原色（经典频道黄）显示" />
                                 <Button x:Name="BtnChanColorReset" Content="按编号配色" Margin="6,0,0,0"
                                         Padding="8,3" Click="BtnChanColorReset_Click" />
                             </StackPanel>

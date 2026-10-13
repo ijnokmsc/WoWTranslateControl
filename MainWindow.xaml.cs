@@ -503,7 +503,7 @@ public partial class MainWindow : Window
     {
         var native = string.Equals((_cfg.CustomChannelColor ?? "").Trim(), "native", StringComparison.OrdinalIgnoreCase);
         ChanColorSwatch.Background = new System.Windows.Media.SolidColorBrush(
-            native ? System.Windows.Media.Color.FromRgb(0x3F, 0xC1, 0xFF) : ParseChanColor(_cfg.CustomChannelColor));
+            native ? System.Windows.Media.Color.FromRgb(0xFF, 0xC9, 0x5C) : ParseChanColor(_cfg.CustomChannelColor));
     }
 
     private void BtnChanColor_Click(object sender, RoutedEventArgs e)
