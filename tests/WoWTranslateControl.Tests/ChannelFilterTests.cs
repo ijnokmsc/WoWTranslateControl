@@ -163,7 +163,6 @@ public class ChannelFilterTests
         {
             ChannelFilterEnabled = true,
             ChannelSynthNums = "2,7",
-            ChannelLocalNums = "4",
         };
 
         // 综合（含世界）
@@ -173,25 +172,26 @@ public class ChannelFilterTests
         Assert.Equal("C9", WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:2", cfg)!.RuleId);
         Assert.Equal("C9", WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:7", cfg)!.RuleId);
 
-        // 本地防务
+        // 编号 4 不在综合勾选列表 → C8（须先关闭「其他自定义」放行开关）；勾上 4 后放行
+        cfg.ChannelWorld = false;
+        Assert.Equal("C8", WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:4", cfg)!.RuleId);
         cfg.ChannelSynth = true;
+        cfg.ChannelSynthNums = "2,4,7";
         Assert.Null(WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:4", cfg));
-        cfg.ChannelLocal = false;
-        Assert.Equal("C10", WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:4", cfg)!.RuleId);
 
         // 其他自定义编号 → C8 开关；旧式无编号 CHANNEL 同样归 C8
-        cfg.ChannelLocal = true;
+        cfg.ChannelSynthNums = "2,7";
+        cfg.ChannelWorld = true;
         Assert.Null(WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:3", cfg));
         Assert.Null(WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL", cfg));
         cfg.ChannelWorld = false;
         Assert.Equal("C8", WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:3", cfg)!.RuleId);
         Assert.Equal("C8", WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL", cfg)!.RuleId);
 
-        // 编号列表可改：本地编号改为 6 后，CHANNEL:6 归本地、CHANNEL:4 归其他
-        cfg.ChannelWorld = true;
-        cfg.ChannelLocalNums = "6";
-        cfg.ChannelLocal = false;
-        Assert.Equal("C10", WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:6", cfg)!.RuleId);
-        Assert.Null(WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:4", cfg));
+        // 编号列表可改：改为 6,7 后 CHANNEL:6 放行、CHANNEL:4 归 C8
+        cfg.ChannelSynthNums = "6,7";
+        Assert.Null(WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:6", cfg));
+        cfg.ChannelWorld = false;
+        Assert.Equal("C8", WoWTranslateControl.Core.MessageFilter.CheckChannel("CHANNEL:4", cfg)!.RuleId);
     }
 }

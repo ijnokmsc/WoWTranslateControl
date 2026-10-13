@@ -213,7 +213,7 @@
                             <CheckBox x:Name="ChkChanSynth" Content="综合(含世界) 编号（勾选=翻译该编号频道）："
                                       Checked="Channel_Changed" Unchecked="Channel_Changed"
                                       ToolTip="勾选你的服务器上属于综合类的自定义频道编号；每个服务器编号定义不同" />
-                            <UniformGrid Columns="10" Margin="4,2,0,0">
+                            <UniformGrid Columns="5" Margin="4,2,0,0">
                                 <CheckBox x:Name="ChkChanSynth1" Content="1" Checked="Channel_Changed" Unchecked="Channel_Changed" />
                                 <CheckBox x:Name="ChkChanSynth2" Content="2" Checked="Channel_Changed" Unchecked="Channel_Changed" />
                                 <CheckBox x:Name="ChkChanSynth3" Content="3" Checked="Channel_Changed" Unchecked="Channel_Changed" />
@@ -225,13 +225,7 @@
                                 <CheckBox x:Name="ChkChanSynth9" Content="9" Checked="Channel_Changed" Unchecked="Channel_Changed" />
                                 <CheckBox x:Name="ChkChanSynth10" Content="10" Checked="Channel_Changed" Unchecked="Channel_Changed" />
                             </UniformGrid>
-                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                <CheckBox x:Name="ChkChanLocal" Content="本地防务 编号"
-                                          Checked="Channel_Changed" Unchecked="Channel_Changed"
-                                          ToolTip="本地防务类自定义频道的编号（单独开关）" />
-                                <TextBox x:Name="TxtChanLocalNums" Width="36" Margin="4,0,0,0"
-                                         Text="4" LostFocus="TxtChanLocalNums_LostFocus" />
-                            </StackPanel>
+
                             <TextBlock Style="{StaticResource Dim}" Margin="0,4,0,0"
                                        TextWrapping="Wrap"
                                        Text="开关变更即时生效。" />

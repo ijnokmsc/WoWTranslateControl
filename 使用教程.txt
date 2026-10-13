@@ -61,7 +61,7 @@
 
 【五、进入游戏】
   1. 聊天框出现：
-     [WTC] WoWTranslateDirect 3.2.2 by ijnokmsc (driver v46, ...)
+     [WTC] WoWTranslateDirect 3.2.1 by ijnokmsc (driver v47, ...)
      即部署成功（横幅在进入世界约 1 秒后出现）
   2. 英文聊天 → 自动显示中文译文（综合聊天框）
   3. 你发的中文 → 自动以英文发出（约 1-3 秒；超时 25 秒发原文兜底）

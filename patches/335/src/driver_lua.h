@@ -558,7 +558,7 @@ local function BannerPrint()
   if bannerShown then return end
   bannerShown = true
   if DEFAULT_CHAT_FRAME then
-    DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.2.2 by ijnokmsc (driver v47, mode=" ..
+    DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFF[WTC]|r WoWTranslateDirect 3.2.1 by ijnokmsc (driver v47, mode=" ..
       displayMode .. ", outgoing=" .. outgoingMode .. ")")
   end
 end

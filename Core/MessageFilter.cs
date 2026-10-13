@@ -70,10 +70,6 @@ public static class MessageFilter
                 return cfg.ChannelSynth ? null : new FilterDecision(
                     true, "C9", "综合频道关闭",
                     $"自定义频道 {num}（综合/世界）已禁用翻译，直接回显原文");
-            if (hasNum && NumListContains(cfg.ChannelLocalNums, num))
-                return cfg.ChannelLocal ? null : new FilterDecision(
-                    true, "C10", "本地防务频道关闭",
-                    $"自定义频道 {num}（本地防务）已禁用翻译，直接回显原文");
             return cfg.ChannelWorld ? null : new FilterDecision(
                 true, "C8", "其他自定义频道关闭",
                 $"自定义频道 {(numText == "" ? "(未识别编号)" : numText)} 已禁用翻译，直接回显原文");

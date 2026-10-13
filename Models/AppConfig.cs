@@ -181,13 +181,9 @@ public sealed class AppConfig
     };
 
     // ---------- 自定义频道按编号归类（v46 驱动上报 CHANNEL:编号） ----------
-    /// <summary>综合类自定义频道编号（逗号分隔，如 "2,7" = 综合、WorldChat）。</summary>
-    public string ChannelSynthNums { get; set; } = "2,7";
+    /// <summary>综合类自定义频道编号（逗号分隔；默认 1-10 全勾，取消勾选的编号回显原文）。</summary>
+    public string ChannelSynthNums { get; set; } = "1,2,3,4,5,6,7,8,9,10";
     public bool ChannelSynth { get; set; } = true;
-
-    /// <summary>本地防务类自定义频道编号（逗号分隔，默认 "4"）。</summary>
-    public string ChannelLocalNums { get; set; } = "4";
-    public bool ChannelLocal { get; set; } = true;
 
     // ---------- 界面 ----------
     /// <summary>流量列表最多保留多少行，防止长时间挂机后 UI 卡顿或内存增长。</summary>

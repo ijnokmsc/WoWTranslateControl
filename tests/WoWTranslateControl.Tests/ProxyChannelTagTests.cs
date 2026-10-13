@@ -86,13 +86,13 @@ public class ProxyChannelTagTests
     }
 
     [Fact]
-    public async Task NumberedChannelLocalDisabledBlocks()
+    public async Task NumberedChannelNotSelectedBlocksAsC8()
     {
-        // 取消勾选本地防务 → CHANNEL:4 被 C10 规则拦截
-        var cfg = new AppConfig { ListenPort = 18447, CacheEnabled = false, ChannelLocal = false };
+        // 编号不在综合勾选列表 → C8 其他自定义拦截
+        var cfg = new AppConfig { ListenPort = 18447, CacheEnabled = false, ChannelSynthNums = "2,7", ChannelWorld = false };
         var entry = await PostOnceAsync(cfg, "\u0001CHANNEL:4\u0001local defense call");
         Assert.NotNull(entry);
         Assert.Equal(TrafficKind.Filtered, entry!.Kind);
-        Assert.Equal("C10", entry.RuleId);
+        Assert.Equal("C8", entry.RuleId);
     }
 }
