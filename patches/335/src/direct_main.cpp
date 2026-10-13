@@ -648,7 +648,7 @@ static void RebuildDriverChunk()
                     part7 + std::to_string(g_customColorR) +
                     ",customG=" + std::to_string(g_customColorG) +
                     ",customB=" + std::to_string(g_customColorB) +
-                    "'}\n" +
+                    "}\n" +
                     wt::DriverLuaCode();
 }
 
